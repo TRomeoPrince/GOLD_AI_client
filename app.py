@@ -122,14 +122,20 @@ class GoldAIClientApp(tk.Tk):
                 instruction_id = int(data.get("instruction_id", 0))
                 payload = data.get("payload") or {}
 
-                result = execute_instruction(payload)
-                ack_status = "EXECUTED" if result.sent else "REJECTED"
-                ack_message = (
-                    f"{result.message} | ticket={result.ticket or '-'} "
-                    f"| volume={result.volume} "
-                    f"| risk={result.planned_risk_pct:.3f}% "
-                    f"| portfolio_after={result.portfolio_after_pct:.3f}%"
-                )
+                if str(payload.get("kind", "")).upper() == "TEST":
+                    ack_status = "TEST_OK"
+                    ack_message = str(
+                        payload.get("message", "Remote link test received.")
+                    )
+                else:
+                    result = execute_instruction(payload)
+                    ack_status = "EXECUTED" if result.sent else "REJECTED"
+                    ack_message = (
+                        f"{result.message} | ticket={result.ticket or '-'} "
+                        f"| volume={result.volume} "
+                        f"| risk={result.planned_risk_pct:.3f}% "
+                        f"| portfolio_after={result.portfolio_after_pct:.3f}%"
+                    )
                 api.acknowledge(
                     self.session_token,
                     instruction_id,
