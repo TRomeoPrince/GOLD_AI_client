@@ -22,6 +22,7 @@ class AuthorizationResult:
     display_name: str = ""
     status: str = "UNKNOWN"
     message: str = ""
+    session_token: str = ""
 
 
 @dataclass
