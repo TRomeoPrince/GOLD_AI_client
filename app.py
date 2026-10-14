@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import tkinter as tk
+import threading
+import time
 from tkinter import messagebox, ttk
 
 import MetaTrader5 as mt5
 
 from client.api import GoldAIServer
+from client.executor import execute_instruction
 from client.storage import load_profile, save_profile
 
 
@@ -17,8 +20,11 @@ class GoldAIClientApp(tk.Tk):
         self.resizable(False, False)
         self.profile = load_profile()
         self.session_token = ""
+        self._worker_stop = threading.Event()
+        self._worker_thread = None
         self._build()
         self.after(250, self.detect_mt5)
+        self.protocol("WM_DELETE_WINDOW", self.on_close)
 
     def _build(self):
         frame = ttk.Frame(self, padding=20)
@@ -90,6 +96,71 @@ class GoldAIClientApp(tk.Tk):
             f"Balance: {account.balance:.2f} {account.currency}"
         )
 
+    def start_instruction_worker(self):
+        if self._worker_thread and self._worker_thread.is_alive():
+            return
+        if not self.session_token:
+            return
+
+        self._worker_stop.clear()
+        self._worker_thread = threading.Thread(
+            target=self._instruction_loop,
+            name="gold-ai-instruction-worker",
+            daemon=True,
+        )
+        self._worker_thread.start()
+
+    def _instruction_loop(self):
+        api = GoldAIServer(self.profile)
+        while not self._worker_stop.is_set():
+            try:
+                data = api.next_instruction(self.session_token)
+                if not data.get("available"):
+                    time.sleep(2)
+                    continue
+
+                instruction_id = int(data.get("instruction_id", 0))
+                payload = data.get("payload") or {}
+
+                result = execute_instruction(payload)
+                ack_status = "EXECUTED" if result.sent else "REJECTED"
+                ack_message = (
+                    f"{result.message} | ticket={result.ticket or '-'} "
+                    f"| volume={result.volume} "
+                    f"| risk={result.planned_risk_pct:.3f}% "
+                    f"| portfolio_after={result.portfolio_after_pct:.3f}%"
+                )
+                api.acknowledge(
+                    self.session_token,
+                    instruction_id,
+                    ack_status,
+                    ack_message,
+                )
+
+                self.after(
+                    0,
+                    lambda text=(
+                        f"{ack_status} • {payload.get('strategy_id','REMOTE')} "
+                        f"{payload.get('direction','')}\n{ack_message}"
+                    ): self.status.set(text),
+                )
+            except Exception as exc:
+                self.after(
+                    0,
+                    lambda err=str(exc): self.status.set(
+                        f"REMOTE LINK ERROR\n{err}"
+                    ),
+                )
+                time.sleep(3)
+
+    def on_close(self):
+        self._worker_stop.set()
+        try:
+            mt5.shutdown()
+        except Exception:
+            pass
+        self.destroy()
+
     def save(self):
         self.profile.server_url = self.server.get().strip()
         self.profile.pairing_code = self.pairing.get().strip()
@@ -112,8 +183,9 @@ class GoldAIClientApp(tk.Tk):
             self.status.set(
                 f"AUTHORIZED • {result.display_name or 'Client'} • {result.status}\n"
                 f"MT5: {self.profile.mt5_login} @ {self.profile.mt5_server}\n"
-                f"{result.message}"
+                f"{result.message}\nListening for GOLD_AI instructions..."
             )
+            self.start_instruction_worker()
         else:
             self.status.set(f"NOT AUTHORIZED • {result.status}\n{result.message}")
             messagebox.showwarning("GOLD_AI", self.status.get())
