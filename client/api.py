@@ -52,3 +52,33 @@ class GoldAIServer:
         )
         response.raise_for_status()
         return response.json()
+
+
+    def next_instruction(self, session_token: str) -> dict:
+        response = httpx.get(
+            f"{self.profile.server_url.rstrip('/')}/v1/instructions/next",
+            headers={"Authorization": f"Bearer {session_token}"},
+            timeout=self.timeout,
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def acknowledge(
+        self,
+        session_token: str,
+        instruction_id: int,
+        status: str,
+        message: str = "",
+    ) -> dict:
+        response = httpx.post(
+            f"{self.profile.server_url.rstrip('/')}/v1/instructions/ack",
+            headers={"Authorization": f"Bearer {session_token}"},
+            json={
+                "instruction_id": int(instruction_id),
+                "status": status,
+                "message": message,
+            },
+            timeout=self.timeout,
+        )
+        response.raise_for_status()
+        return response.json()
