@@ -1,3 +1,5 @@
 httpx>=0.28.0
 websockets>=15.0
 python-dotenv>=1.0.1
+MetaTrader5>=5.0.45
+pyinstaller>=6.10.0
