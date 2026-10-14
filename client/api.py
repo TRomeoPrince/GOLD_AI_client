@@ -31,6 +31,7 @@ class GoldAIServer:
                 display_name=str(data.get("display_name", "")),
                 status=str(data.get("status", "UNKNOWN")),
                 message=str(data.get("message", "")),
+                session_token=str(data.get("session_token", "")),
             )
         except Exception as exc:
             return AuthorizationResult(
