@@ -7,7 +7,7 @@ from tkinter import messagebox, ttk
 
 import MetaTrader5 as mt5
 
-from client.api import GoldAIServer
+from client.api import ClientAccessRevoked, GoldAIServer
 from client.executor import execute_instruction
 from client.storage import load_profile, save_profile
 
@@ -15,8 +15,8 @@ from client.storage import load_profile, save_profile
 class GoldAIClientApp(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("GOLD_AI Client")
-        self.geometry("560x470")
+        self.title("GOLD_AI Client V0.1")
+        self.geometry("620x560")
         self.resizable(False, False)
         self.profile = load_profile()
         self.session_token = ""
@@ -30,10 +30,10 @@ class GoldAIClientApp(tk.Tk):
         frame = ttk.Frame(self, padding=20)
         frame.pack(fill="both", expand=True)
 
-        ttk.Label(frame, text="GOLD_AI", font=("Segoe UI", 20, "bold")).pack(anchor="w")
+        ttk.Label(frame, text="GOLD_AI", font=("Segoe UI", 22, "bold")).pack(anchor="w")
         ttk.Label(
             frame,
-            text="Thin execution client — strategy logic remains on the owner server.",
+            text="Protected execution client • MT5 stays on this PC • Strategy logic stays private.",
         ).pack(anchor="w", pady=(0, 18))
 
         form = ttk.Frame(frame)
@@ -66,7 +66,17 @@ class GoldAIClientApp(tk.Tk):
 
         self.status = tk.StringVar(value="Not connected")
         ttk.Separator(frame).pack(fill="x", pady=8)
-        ttk.Label(frame, textvariable=self.status, wraplength=500).pack(anchor="w", pady=8)
+        ttk.Label(frame, textvariable=self.status, wraplength=560).pack(anchor="w", pady=8)
+
+        ttk.Separator(frame).pack(fill="x", pady=(8, 8))
+        ttk.Label(
+            frame,
+            text=(
+                "Keep MetaTrader 5 open and Algo Trading enabled while GOLD_AI is connected. "
+                "Existing broker-side SL/TP remain on MT5 if the app is closed."
+            ),
+            wraplength=560,
+        ).pack(anchor="w")
 
     def _row(self, parent, label, value):
         wrap = ttk.Frame(parent)
@@ -150,11 +160,21 @@ class GoldAIClientApp(tk.Tk):
                         f"{payload.get('direction','')}\n{ack_message}"
                     ): self.status.set(text),
                 )
+            except ClientAccessRevoked as exc:
+                self.after(
+                    0,
+                    lambda err=str(exc): self.status.set(
+                        f"ACCESS DISABLED\n{err}\nNo new GOLD_AI trades will be accepted."
+                    ),
+                )
+                self.session_token = ""
+                self._worker_stop.set()
+                return
             except Exception as exc:
                 self.after(
                     0,
                     lambda err=str(exc): self.status.set(
-                        f"REMOTE LINK ERROR\n{err}"
+                        f"REMOTE LINK ERROR\n{err}\nRetrying..."
                     ),
                 )
                 time.sleep(3)
