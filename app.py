@@ -33,7 +33,7 @@ class GoldAIClientApp(tk.Tk):
         form = ttk.Frame(frame)
         form.pack(fill="x")
 
-        self.server = self._row(form, "Server", self.profile.server_url)
+        self.server = self._row(form, "Server URL", self.profile.server_url)
         self.pairing = self._row(form, "Pairing code", self.profile.pairing_code)
         self.mt5_login = self._row(
             form, "MT5 login", "" if self.profile.mt5_login is None else str(self.profile.mt5_login)
@@ -49,7 +49,7 @@ class GoldAIClientApp(tk.Tk):
         ).pack(anchor="w", pady=(14, 2))
         ttk.Label(
             frame,
-            text="If enabled: save, then send /start to the GOLD_AI Telegram bot.",
+            text="If enabled: save, then send /start to @Princetradingbot.",
         ).pack(anchor="w")
 
         buttons = ttk.Frame(frame)
