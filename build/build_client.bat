@@ -7,33 +7,31 @@ echo   GOLD_AI CLIENT BUILDER
 echo ==========================================
 echo.
 
-if not exist ".venv\Scripts\python.exe" (
-  echo [1/5] Creating client virtual environment...
+if exist ".venv\Scripts\python.exe" goto :venv_ready
 
-  set "BOOTSTRAP_PY="
+echo [1/5] Creating client virtual environment...
 
-  if exist "%USERPROFILE%\Desktop\Bots\Forex\AMD1\.venv\Scripts\python.exe" (
-    set "BOOTSTRAP_PY=%USERPROFILE%\Desktop\Bots\Forex\AMD1\.venv\Scripts\python.exe"
-  )
-
-  if not defined BOOTSTRAP_PY (
-    where python.exe >nul 2>nul
-    if not errorlevel 1 set "BOOTSTRAP_PY=python.exe"
-  )
-
-  if not defined BOOTSTRAP_PY (
-    echo Could not find a working Python interpreter.
-    echo Expected either:
-    echo   %USERPROFILE%\Desktop\Bots\Forex\AMD1\.venv\Scripts\python.exe
-    echo or a working python.exe on PATH.
-    goto :fail
-  )
-
-  "%BOOTSTRAP_PY%" -m venv .venv
+if exist "%USERPROFILE%\Desktop\Bots\Forex\AMD1\.venv\Scripts\python.exe" (
+  "%USERPROFILE%\Desktop\Bots\Forex\AMD1\.venv\Scripts\python.exe" -m venv .venv
   if errorlevel 1 goto :fail
-) else (
-  echo [1/5] Client virtual environment already exists.
+  goto :venv_ready
 )
+
+where python.exe >nul 2>nul
+if not errorlevel 1 (
+  python.exe -m venv .venv
+  if errorlevel 1 goto :fail
+  goto :venv_ready
+)
+
+echo Could not find a working Python interpreter.
+echo Expected either:
+echo   %USERPROFILE%\Desktop\Bots\Forex\AMD1\.venv\Scripts\python.exe
+echo or python.exe on PATH.
+goto :fail
+
+:venv_ready
+echo [1/5] Client virtual environment ready.
 
 echo [2/5] Installing/updating dependencies...
 ".venv\Scripts\python.exe" -m pip install --upgrade pip
