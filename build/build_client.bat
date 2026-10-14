@@ -43,6 +43,10 @@ echo [3/5] Cleaning previous build...
 if exist build\pyi rmdir /s /q build\pyi
 if exist dist\GOLD_AI_Client.exe del /q dist\GOLD_AI_Client.exe
 
+echo Refreshing NumPy/MT5 binary packages...
+".venv\Scripts\python.exe" -m pip install --upgrade --force-reinstall numpy MetaTrader5
+if errorlevel 1 goto :fail
+
 echo [4/5] Compiling GOLD_AI_Client.exe...
 pushd build
 "..\.venv\Scripts\python.exe" -m PyInstaller --clean --noconfirm --distpath "..\dist" --workpath "pyi" GOLD_AI_Client.spec
