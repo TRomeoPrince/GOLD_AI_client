@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import httpx
 
+class ClientAccessRevoked(RuntimeError):
+    pass
+
 from .models import AuthorizationResult, ClientProfile
 
 
@@ -60,6 +63,13 @@ class GoldAIServer:
             headers={"Authorization": f"Bearer {session_token}"},
             timeout=self.timeout,
         )
+        if response.status_code == 403:
+            detail = ""
+            try:
+                detail = str(response.json().get("detail", "Access disabled."))
+            except Exception:
+                detail = "Access disabled."
+            raise ClientAccessRevoked(detail)
         response.raise_for_status()
         return response.json()
 
