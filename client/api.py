@@ -13,11 +13,22 @@ class GoldAIServer:
         self.profile = profile
         self.timeout = timeout
 
+    @staticmethod
+    def _headers(session_token: str = "") -> dict[str, str]:
+        headers = {
+            "ngrok-skip-browser-warning": "true",
+            "User-Agent": "GOLD_AI_Client/1.0",
+        }
+        if session_token:
+            headers["Authorization"] = f"Bearer {session_token}"
+        return headers
+
     def authorize(self) -> AuthorizationResult:
         """Authorize on startup. No periodic heartbeat is used."""
         try:
             response = httpx.post(
                 f"{self.profile.server_url.rstrip('/')}/v1/client/authorize",
+                headers=self._headers(),
                 json={
                     "client_id": self.profile.client_id,
                     "pairing_code": self.profile.pairing_code,
@@ -46,6 +57,7 @@ class GoldAIServer:
     def register_telegram(self, username: str) -> dict:
         response = httpx.post(
             f"{self.profile.server_url.rstrip('/')}/v1/client/telegram",
+            headers=self._headers(),
             json={
                 "client_id": self.profile.client_id,
                 "pairing_code": self.profile.pairing_code,
@@ -60,7 +72,7 @@ class GoldAIServer:
     def next_instruction(self, session_token: str) -> dict:
         response = httpx.get(
             f"{self.profile.server_url.rstrip('/')}/v1/instructions/next",
-            headers={"Authorization": f"Bearer {session_token}"},
+            headers=self._headers(session_token),
             timeout=self.timeout,
         )
         if response.status_code == 403:
