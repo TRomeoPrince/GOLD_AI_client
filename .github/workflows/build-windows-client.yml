@@ -1,0 +1,40 @@
+name: Build GOLD_AI Windows Client
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "app.py"
+      - "client/**"
+      - "build/GOLD_AI_Client.spec"
+      - "requirements.txt"
+      - ".github/workflows/build-windows-client.yml"
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        shell: cmd
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Build GOLD_AI_Client.exe
+        shell: cmd
+        run: |
+          python -m PyInstaller --clean --noconfirm --distpath dist --workpath build\pyi build\GOLD_AI_Client.spec
+
+      - name: Upload Windows client
+        uses: actions/upload-artifact@v4
+        with:
+          name: GOLD_AI-Windows-Client
+          path: dist/GOLD_AI_Client.exe
+          retention-days: 90
