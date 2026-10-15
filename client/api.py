@@ -94,7 +94,7 @@ class GoldAIServer:
     ) -> dict:
         response = httpx.post(
             f"{self.profile.server_url.rstrip('/')}/v1/instructions/ack",
-            headers={"Authorization": f"Bearer {session_token}"},
+            headers=self._headers(session_token),
             json={
                 "instruction_id": int(instruction_id),
                 "status": status,
