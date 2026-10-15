@@ -8,7 +8,7 @@ from typing import Optional
 class ClientProfile:
     client_id: str = ""
     display_name: str = ""
-    server_url: str = "http://127.0.0.1:8765"
+    server_url: str = "https://grandpa-skier-sphere.ngrok-free.dev"
     pairing_code: str = ""
     telegram_username: str = ""
     telegram_enabled: bool = False
