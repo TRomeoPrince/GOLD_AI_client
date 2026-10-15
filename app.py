@@ -9,7 +9,7 @@ import MetaTrader5 as mt5
 
 from client.api import ClientAccessRevoked, GoldAIServer
 from client.executor import execute_instruction
-from client.storage import load_profile, save_profile
+from client.storage import PUBLIC_SERVER_URL, load_profile, save_profile
 
 
 class GoldAIClientApp(tk.Tk):
@@ -19,6 +19,7 @@ class GoldAIClientApp(tk.Tk):
         self.geometry("620x560")
         self.resizable(False, False)
         self.profile = load_profile()
+        self.profile.server_url = PUBLIC_SERVER_URL
         self.session_token = ""
         self._worker_stop = threading.Event()
         self._worker_thread = None
@@ -39,7 +40,11 @@ class GoldAIClientApp(tk.Tk):
         form = ttk.Frame(frame)
         form.pack(fill="x")
 
-        self.server = self._row(form, "Server URL", self.profile.server_url)
+        ttk.Label(
+            form,
+            text=f"Server: {PUBLIC_SERVER_URL}",
+            foreground="#666666",
+        ).pack(anchor="w", pady=(0, 8))
         self.pairing = self._row(form, "Pairing code", self.profile.pairing_code)
         self.mt5_login = self._row(
             form, "MT5 login", "" if self.profile.mt5_login is None else str(self.profile.mt5_login)
@@ -188,7 +193,7 @@ class GoldAIClientApp(tk.Tk):
         self.destroy()
 
     def save(self):
-        self.profile.server_url = self.server.get().strip()
+        self.profile.server_url = PUBLIC_SERVER_URL
         self.profile.pairing_code = self.pairing.get().strip()
         self.profile.mt5_server = self.mt5_server.get().strip()
         self.profile.telegram_username = self.telegram.get().strip().lstrip("@")
