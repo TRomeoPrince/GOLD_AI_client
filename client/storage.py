@@ -9,13 +9,16 @@ from .models import ClientProfile
 
 APP_DIR = Path.home() / ".gold_ai_client"
 PROFILE_PATH = APP_DIR / "profile.json"
+PUBLIC_SERVER_URL = "https://grandpa-skier-sphere.ngrok-free.dev"
 
 
 def load_profile() -> ClientProfile:
     if not PROFILE_PATH.exists():
         return ClientProfile()
     try:
-        return ClientProfile(**json.loads(PROFILE_PATH.read_text(encoding="utf-8")))
+        profile = ClientProfile(**json.loads(PROFILE_PATH.read_text(encoding="utf-8")))
+        profile.server_url = PUBLIC_SERVER_URL
+        return profile
     except Exception:
         return ClientProfile()
 
