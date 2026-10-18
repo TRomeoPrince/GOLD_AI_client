@@ -12,17 +12,45 @@ from client.executor import execute_instruction
 from client.storage import PUBLIC_SERVER_URL, load_profile, save_profile
 
 
+
+def apply_theme(root):
+    """Task Harbor palette; presentation only, no execution state."""
+    root.configure(background="#F4F7F6")
+    root.option_add("*Font", ("Segoe UI", 10))
+    style = ttk.Style(root)
+    style.theme_use("clam")
+    style.configure(".", background="#F4F7F6", foreground="#172D35", font=("Segoe UI", 10))
+    style.configure("TFrame", background="#F4F7F6")
+    style.configure("TLabel", background="#F4F7F6", foreground="#172D35")
+    style.configure("Muted.TLabel", foreground="#60746B")
+    style.configure("Hero.TLabel", font=("Segoe UI", 27, "bold"), foreground="#176B53")
+    style.configure("Card.TFrame", background="#FFFFFF")
+    style.configure("Card.TLabel", background="#FFFFFF", foreground="#172D35")
+    style.configure("TButton", padding=(12, 9), background="#E3ECE7", foreground="#254D3F", borderwidth=0)
+    style.map("TButton", background=[("active", "#D2E5DC")], foreground=[("disabled", "#73837B")])
+    style.configure("Accent.TButton", background="#176B53", foreground="#FFFFFF")
+    style.map("Accent.TButton", background=[("active", "#11533F"), ("disabled", "#CBD7D0")])
+    style.configure("Danger.TButton", foreground="#9B2525", background="#FBE9E7")
+    style.configure("TEntry", fieldbackground="#FFFFFF", padding=7)
+    style.configure("TLabelframe", background="#F4F7F6", bordercolor="#DCE5E1")
+    style.configure("TLabelframe.Label", foreground="#176B53", font=("Segoe UI", 11, "bold"))
+    style.configure("Treeview", background="#FFFFFF", fieldbackground="#FFFFFF", rowheight=36, borderwidth=0)
+    style.configure("Treeview.Heading", background="#E3ECE7", foreground="#254D3F", padding=9, font=("Segoe UI", 10, "bold"))
+    style.map("Treeview", background=[("selected", "#176B53")], foreground=[("selected", "#FFFFFF")])
+    style.configure("TCheckbutton", background="#F4F7F6", padding=6)
+
 class GoldAIClientApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("GOLD_AI Client V0.1")
-        self.geometry("620x560")
-        self.resizable(False, False)
+        self.geometry("740x760")
+        self.minsize(740, 760)
         self.profile = load_profile()
         self.profile.server_url = PUBLIC_SERVER_URL
         self.session_token = ""
         self._worker_stop = threading.Event()
         self._worker_thread = None
+        apply_theme(self)
         self._build()
         self.after(250, self.detect_mt5)
         self.protocol("WM_DELETE_WINDOW", self.on_close)
@@ -31,19 +59,19 @@ class GoldAIClientApp(tk.Tk):
         frame = ttk.Frame(self, padding=20)
         frame.pack(fill="both", expand=True)
 
-        ttk.Label(frame, text="GOLD_AI", font=("Segoe UI", 22, "bold")).pack(anchor="w")
+        ttk.Label(frame, text="GOLD_AI  /  Your trading link", style="Hero.TLabel").pack(anchor="w")
         ttk.Label(
             frame,
-            text="Protected execution client • MT5 stays on this PC • Strategy logic stays private.",
+            text="Connect your account. Stay in control.",
         ).pack(anchor="w", pady=(0, 18))
 
-        form = ttk.Frame(frame)
+        form = ttk.LabelFrame(frame, text="01  /  Account & pairing", padding=16)
         form.pack(fill="x")
 
         ttk.Label(
             form,
             text=f"Server: {PUBLIC_SERVER_URL}",
-            foreground="#666666",
+            foreground="#60746B", wraplength=650,
         ).pack(anchor="w", pady=(0, 8))
         self.pairing = self._row(form, "Pairing code", self.profile.pairing_code)
         self.mt5_login = self._row(
@@ -67,11 +95,13 @@ class GoldAIClientApp(tk.Tk):
         buttons.pack(fill="x", pady=18)
         ttk.Button(buttons, text="Detect MT5", command=self.detect_mt5).pack(side="left")
         ttk.Button(buttons, text="Save", command=self.save).pack(side="left", padx=8)
-        ttk.Button(buttons, text="Connect / Authorize", command=self.authorize).pack(side="left")
+        ttk.Button(buttons, text="Connect / Authorize", style="Accent.TButton", command=self.authorize).pack(side="left")
 
         self.status = tk.StringVar(value="Not connected")
         ttk.Separator(frame).pack(fill="x", pady=8)
-        ttk.Label(frame, textvariable=self.status, wraplength=560).pack(anchor="w", pady=8)
+        status_card = ttk.LabelFrame(frame, text="02  /  Connection & activity", padding=16)
+        status_card.pack(fill="x", pady=8)
+        ttk.Label(status_card, textvariable=self.status, wraplength=640, font=("Segoe UI", 11, "bold")).pack(anchor="w")
 
         ttk.Separator(frame).pack(fill="x", pady=(8, 8))
         ttk.Label(
@@ -80,7 +110,7 @@ class GoldAIClientApp(tk.Tk):
                 "Keep MetaTrader 5 open and Algo Trading enabled while GOLD_AI is connected. "
                 "Existing broker-side SL/TP remain on MT5 if the app is closed."
             ),
-            wraplength=560,
+            wraplength=640,
         ).pack(anchor="w")
 
     def _row(self, parent, label, value):
