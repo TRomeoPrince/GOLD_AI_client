@@ -69,6 +69,13 @@ class GoldAIClientApp(tk.Tk):
         ttk.Button(buttons, text="Save", command=self.save).pack(side="left", padx=8)
         ttk.Button(buttons, text="Connect / Authorize", command=self.authorize).pack(side="left")
 
+        self.subscription_status = tk.StringVar(value="Subscription: not loaded")
+        ttk.Label(
+            frame,
+            textvariable=self.subscription_status,
+            font=("Segoe UI", 10, "bold"),
+        ).pack(anchor="w", pady=(2, 4))
+
         self.status = tk.StringVar(value="Not connected")
         ttk.Separator(frame).pack(fill="x", pady=8)
         ttk.Label(frame, textvariable=self.status, wraplength=560).pack(anchor="w", pady=8)
@@ -212,6 +219,17 @@ class GoldAIClientApp(tk.Tk):
             if result.display_name:
                 self.profile.display_name = result.display_name
                 save_profile(self.profile)
+            try:
+                subscription_data = GoldAIServer(self.profile).subscription(self.session_token)
+                sub = subscription_data.get("subscription") or {}
+                self.subscription_status.set(
+                    "Subscription: "
+                    f"{sub.get('plan_code', 'STARTER')} • {sub.get('status', 'TRIAL')} "
+                    f"• expires {sub.get('expires_utc') or 'not set'}"
+                )
+            except Exception:
+                self.subscription_status.set("Subscription: status unavailable")
+
             self.status.set(
                 f"AUTHORIZED • {result.display_name or 'Client'} • {result.status}\n"
                 f"MT5: {self.profile.mt5_login} @ {self.profile.mt5_server}\n"
