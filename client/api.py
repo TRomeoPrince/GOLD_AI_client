@@ -69,6 +69,23 @@ class GoldAIServer:
         return response.json()
 
 
+    def risk_policy(self, session_token: str) -> dict:
+        response = httpx.get(
+            f"{self.profile.server_url.rstrip('/')}/v1/client/risk-policy",
+            headers=self._headers(session_token),
+            timeout=self.timeout,
+        )
+        if response.status_code == 403:
+            detail = ""
+            try:
+                detail = str(response.json().get("detail", "Access disabled."))
+            except Exception:
+                detail = "Access disabled."
+            raise ClientAccessRevoked(detail)
+        response.raise_for_status()
+        return response.json()
+
+
     def next_instruction(self, session_token: str) -> dict:
         response = httpx.get(
             f"{self.profile.server_url.rstrip('/')}/v1/instructions/next",
