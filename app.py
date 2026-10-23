@@ -143,7 +143,8 @@ class GoldAIClientApp(tk.Tk):
                         payload.get("message", "Remote link test received.")
                     )
                 else:
-                    result = execute_instruction(payload)
+                    policy = api.risk_policy(self.session_token)
+                    result = execute_instruction(payload, policy)
                     ack_status = "EXECUTED" if result.sent else "REJECTED"
                     ack_message = (
                         f"{result.message} | ticket={result.ticket or '-'} "
