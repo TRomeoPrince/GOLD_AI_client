@@ -69,6 +69,16 @@ class GoldAIServer:
         return response.json()
 
 
+    def subscription(self, session_token: str) -> dict:
+        response = httpx.get(
+            f"{self.profile.server_url.rstrip('/')}/v1/mobile/subscription",
+            headers=self._headers(session_token),
+            timeout=self.timeout,
+        )
+        response.raise_for_status()
+        return response.json()
+
+
     def risk_policy(self, session_token: str) -> dict:
         response = httpx.get(
             f"{self.profile.server_url.rstrip('/')}/v1/client/risk-policy",
