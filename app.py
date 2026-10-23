@@ -15,7 +15,7 @@ from client.storage import PUBLIC_SERVER_URL, load_profile, save_profile
 class GoldAIClientApp(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("GOLD_AI Client V0.1")
+        self.title("GOLD_AI Client • Protected MT5 Executor")
         self.geometry("620x560")
         self.resizable(False, False)
         self.profile = load_profile()
