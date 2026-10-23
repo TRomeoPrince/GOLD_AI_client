@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from math import floor
 
 import MetaTrader5 as mt5
@@ -48,14 +49,21 @@ def _loss(direction: str, symbol: str, volume: float, entry: float, sl: float) -
     return abs(min(float(pnl), 0.0))
 
 
-def _volume_for_risk(direction: str, symbol: str, entry: float, sl: float) -> tuple[float, float]:
+def _volume_for_risk(
+    direction: str,
+    symbol: str,
+    entry: float,
+    sl: float,
+    target_risk_pct: float,
+    max_single_risk_pct: float,
+) -> tuple[float, float]:
     account = mt5.account_info()
     info = mt5.symbol_info(symbol)
     if account is None or info is None:
         raise RuntimeError("Account/symbol info unavailable.")
 
     equity = float(account.equity)
-    target_cash = equity * TARGET_RISK_PCT / 100.0
+    target_cash = equity * float(target_risk_pct) / 100.0
     loss_one = _loss(direction, symbol, 1.0, entry, sl)
     if loss_one <= 0:
         raise RuntimeError("Invalid stop-loss risk.")
@@ -65,14 +73,14 @@ def _volume_for_risk(direction: str, symbol: str, entry: float, sl: float) -> tu
     if raw < vmin:
         planned = _loss(direction, symbol, vmin, entry, sl)
         pct = 100.0 * planned / equity
-        return (vmin, pct) if pct <= MAX_SINGLE_RISK_PCT else (0.0, pct)
+        return (vmin, pct) if pct <= float(max_single_risk_pct) else (0.0, pct)
 
     volume = floor(raw / step) * step
     volume = min(max(volume, vmin), vmax)
     volume = round(volume, 8)
     planned = _loss(direction, symbol, volume, entry, sl)
     pct = 100.0 * planned / equity
-    if pct > MAX_SINGLE_RISK_PCT:
+    if pct > float(max_single_risk_pct):
         return 0.0, pct
     return volume, pct
 
@@ -100,7 +108,33 @@ def _open_risk_pct() -> float:
     return 100.0 * total / equity
 
 
-def execute_instruction(payload: dict) -> ExecutionResult:
+def _day_performance_pct() -> tuple[float, float]:
+    account = mt5.account_info()
+    if account is None:
+        return float("inf"), 0.0
+
+    now = datetime.now()
+    start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    deals = mt5.history_deals_get(start, now) or ()
+
+    realized = 0.0
+    for d in deals:
+        realized += float(getattr(d, "profit", 0.0) or 0.0)
+        realized += float(getattr(d, "commission", 0.0) or 0.0)
+        realized += float(getattr(d, "swap", 0.0) or 0.0)
+        realized += float(getattr(d, "fee", 0.0) or 0.0)
+
+    start_balance = float(account.balance) - realized
+    if start_balance <= 0:
+        return float("inf"), 0.0
+
+    equity = float(account.equity)
+    loss_pct = 100.0 * max(0.0, start_balance - equity) / start_balance
+    profit_pct = 100.0 * max(0.0, equity - start_balance) / start_balance
+    return loss_pct, profit_pct
+
+
+def execute_instruction(payload: dict, policy: dict | None = None) -> ExecutionResult:
     if not mt5.initialize():
         raise RuntimeError(f"MT5 initialize failed: {mt5.last_error()}")
     terminal = mt5.terminal_info()
@@ -109,6 +143,31 @@ def execute_instruction(payload: dict) -> ExecutionResult:
         raise RuntimeError("MT5 terminal/account unavailable.")
     if not bool(getattr(terminal, "trade_allowed", False)):
         return ExecutionResult(False, None, "Algo Trading is disabled.")
+
+    policy = policy or {}
+    risk_per_trade_pct = min(float(policy.get("risk_per_trade_pct", TARGET_RISK_PCT)), 2.0)
+    max_open_risk_pct = min(float(policy.get("max_open_risk_pct", MAX_OPEN_RISK_PCT)), 40.0)
+    max_daily_loss_pct = min(float(policy.get("max_daily_loss_pct", 10.0)), 10.0)
+    daily_profit_target_enabled = bool(policy.get("daily_profit_target_enabled", False))
+    daily_profit_target_pct = float(policy.get("daily_profit_target_pct", 0.0) or 0.0)
+
+    daily_loss_pct, daily_profit_pct = _day_performance_pct()
+    if daily_loss_pct >= max_daily_loss_pct:
+        return ExecutionResult(
+            False,
+            None,
+            f"DAILY_LOSS_BLOCKED: {daily_loss_pct:.2f}% >= {max_daily_loss_pct:.2f}%.",
+        )
+    if (
+        daily_profit_target_enabled
+        and daily_profit_target_pct > 0
+        and daily_profit_pct >= daily_profit_target_pct
+    ):
+        return ExecutionResult(
+            False,
+            None,
+            f"DAILY_PROFIT_TARGET_REACHED: {daily_profit_pct:.2f}% >= {daily_profit_target_pct:.2f}%.",
+        )
 
     direction = str(payload["direction"]).upper()
     symbol = _resolve_symbol(str(payload.get("symbol_hint") or payload.get("market") or "XAUUSD"))
@@ -123,20 +182,27 @@ def execute_instruction(payload: dict) -> ExecutionResult:
     if not valid:
         return ExecutionResult(False, None, "STALE_SIGNAL: current price is outside SL/TP geometry.")
 
-    volume, single_pct = _volume_for_risk(direction, symbol, price, sl)
+    volume, single_pct = _volume_for_risk(
+        direction,
+        symbol,
+        price,
+        sl,
+        risk_per_trade_pct,
+        min(risk_per_trade_pct, 2.0),
+    )
     if volume <= 0:
         return ExecutionResult(
             False, None,
-            f"RISK_BLOCKED: broker minimum would risk {single_pct:.2f}% (> {MAX_SINGLE_RISK_PCT:.2f}%).",
+            f"RISK_BLOCKED: broker minimum would risk {single_pct:.2f}% (> {risk_per_trade_pct:.2f}%).",
             planned_risk_pct=single_pct,
         )
 
     open_pct = _open_risk_pct()
     post_pct = open_pct + single_pct
-    if post_pct > MAX_OPEN_RISK_PCT + 0.001:
+    if post_pct > max_open_risk_pct + 0.001:
         return ExecutionResult(
             False, None,
-            f"PORTFOLIO_RISK_BLOCKED: {open_pct:.2f}% + {single_pct:.2f}% = {post_pct:.2f}% (> {MAX_OPEN_RISK_PCT:.2f}%).",
+            f"PORTFOLIO_RISK_BLOCKED: {open_pct:.2f}% + {single_pct:.2f}% = {post_pct:.2f}% (> {max_open_risk_pct:.2f}%).",
             volume=volume,
             planned_risk_pct=single_pct,
             portfolio_after_pct=post_pct,
