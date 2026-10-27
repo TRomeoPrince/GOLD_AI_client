@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 
@@ -14,6 +14,12 @@ class ClientProfile:
     telegram_enabled: bool = False
     mt5_login: Optional[int] = None
     mt5_server: str = ""
+    display_timezone: str = "UTC"
+    accounts: list[dict] = field(default_factory=list)
+    retry_interval: float = 5.0
+    retry_cap: float = 30.0
+    retries_before_alert: int = 5
+    alert_cooldown: float = 300.0
 
 
 @dataclass
@@ -23,6 +29,9 @@ class AuthorizationResult:
     status: str = "UNKNOWN"
     message: str = ""
     session_token: str = ""
+    account_id: int | None = None
+    max_mt5_accounts: int = 1
+    display_timezone: str = "UTC"
 
 
 @dataclass

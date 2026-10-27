@@ -4,3 +4,5 @@ python-dotenv>=1.0.1
 MetaTrader5>=5.0.45
 pyinstaller>=6.10.0
 numpy>=2.1.0
+Pillow>=11.0
+tzdata>=2025.1

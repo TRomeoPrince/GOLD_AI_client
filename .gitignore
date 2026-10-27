@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+build/pyi/
+build/azt_pyi/
+dist/
+dist_azt/
+release/
+.env
