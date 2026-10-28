@@ -207,6 +207,18 @@ class RuntimeTests(unittest.TestCase):
             self.assertEqual(runtime.account_lock_path(self.account),expected)
 
 class ApiTests(unittest.TestCase):
+    def test_subscription_compatibility_and_ngrok_user_agent_headers(self):
+        api=GoldAIServer(ClientProfile())
+        response=Mock(status_code=200);response.json.return_value={"subscription":{"plan_code":"STARTER"}}
+        with patch("client.api.httpx.request",return_value=response) as request:
+            self.assertEqual(api.subscription(session_token="private")["subscription"]["plan_code"],"STARTER")
+            self.assertTrue(request.call_args.args[1].endswith("/v1/mobile/subscription"))
+            for call in (lambda:api.authorize(),lambda:api.next_instruction("private"),lambda:api.acknowledge("private",1,"SKIPPED")):
+                call()
+                headers=request.call_args.kwargs["headers"]
+                self.assertEqual(headers["ngrok-skip-browser-warning"],"true")
+                self.assertEqual(headers["User-Agent"],"AZT_Client/2.0")
+            self.assertEqual(request.call_args.kwargs["headers"]["Authorization"],"Bearer private")
     def test_since_cutoff_and_telemetry_are_sent_to_account_bound_endpoints(self):
         api=GoldAIServer(ClientProfile())
         response=Mock(status_code=200);response.json.return_value={"ok":True}
@@ -243,6 +255,17 @@ class ManagerTests(unittest.TestCase):
         self.assertNotIn("one",manager.pending)
 
 class ExecutorSafetyTests(unittest.TestCase):
+    def test_broker_minimum_above_policy_risk_is_blocked_even_below_two_percent(self):
+        account=NS(equity=100,balance=100)
+        terminal=NS(connected=True,trade_allowed=True)
+        info=NS(volume_min=.01,volume_max=100,volume_step=.01,filling_mode=3)
+        payload={"market":"GOLD","direction":"BUY","stop_loss":90,"take_profit":110}
+        with patch.object(executor.mt5,"terminal_info",return_value=terminal),patch.object(executor.mt5,"account_info",return_value=account),patch.object(executor,"_daily_loss_pct",return_value=0),patch.object(executor,"_resolve_symbol",return_value="GOLD"),patch.object(executor.mt5,"symbol_info_tick",return_value=NS(ask=100,bid=99)),patch.object(executor,"tick_utc_epoch",return_value=executor.time.time()),patch.object(executor.mt5,"symbol_info",return_value=info),patch.object(executor.mt5,"order_calc_profit",side_effect=lambda _side,_symbol,volume,_entry,_sl:-150*volume),patch.object(executor.mt5,"order_send") as send:
+            result=executor.execute_instruction(payload,risk_per_trade_pct=.9,max_single_risk_pct=2)
+        self.assertFalse(result.sent)
+        self.assertIn("RISK_BLOCKED",result.message)
+        self.assertAlmostEqual(result.planned_risk_pct,1.5)
+        send.assert_not_called()
     def test_nonfinite_position_risk_is_fail_closed(self):
         position=NS(magic=executor.MAGIC,sl=90,type=0,symbol="GOLD",volume=.01,price_open=100)
         with patch.object(executor.mt5,"account_info",return_value=NS(equity=100)),patch.object(executor.mt5,"positions_get",return_value=[position]),patch.object(executor.mt5,"order_calc_profit",return_value=float("nan")):

@@ -14,6 +14,8 @@ Each terminal runs in a separate hidden process. A per-account Windows lock prev
 
 Execution claims are committed to a local SQLite ledger before submission. An interrupted/ambiguous submission becomes ERROR_REVIEW and is never resubmitted automatically. Failed acknowledgements retry the acknowledgement only. After Start or reconnect, the request cutoff is advanced to current UTC and old queued instructions are discarded. Signals older than 20 minutes or more than 60 seconds ahead are rejected. The client independently resolves the generic market to its own validated broker symbol; owner suffixes are not copied. Verified UTC broker-clock calibration, stale-quote checks, current server risk/news checks, account identity, complete position/history availability and a hard single-trade risk ceiling of 2% protect execution.
 
+The selected per-trade policy is also a strict risk cap: a broker minimum lot risking 1.5% is rejected when the policy is 0.9%, even though it is below the absolute 2% ceiling. All API requests retain ngrok bypass and an explicit AZT Client User-Agent; the existing subscription API wrapper remains available alongside the new overview.
+
 ## Messages, payments and referrals
 
 Admin messages appear in Dashboard without requiring Telegram. Select a message to read it and mark it read. Trades and journals use stored UTC data converted into your chosen display timezone. PnL across different currencies stays separate; missing trade details are not fabricated.

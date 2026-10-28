@@ -1,0 +1,47 @@
+name: Build AZT Windows Client
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "app.py"
+      - "client/**"
+      - "assets/**"
+      - "tests/**"
+      - "build/GOLD_AI_Client.spec"
+      - "requirements.txt"
+      - ".github/workflows/build-windows-client.yml"
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        shell: cmd
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Test client safety
+        shell: cmd
+        run: python -m unittest discover -s tests -v
+
+      - name: Build AZT_Client.exe
+        shell: cmd
+        run: |
+          python -m PyInstaller --clean --noconfirm --distpath dist --workpath build\pyi build\GOLD_AI_Client.spec
+
+      - name: Upload Windows client
+        uses: actions/upload-artifact@v4
+        with:
+          name: AZT-Windows-Client
+          path: dist/AZT_Client.exe
+          if-no-files-found: error
+          retention-days: 90

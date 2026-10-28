@@ -16,10 +16,15 @@ class GoldAIServer:
     def __init__(self, profile: ClientProfile, timeout: float = 10.0):
         self.profile, self.timeout = profile, timeout
 
+    @staticmethod
+    def _headers(session_token=""):
+        headers = {"ngrok-skip-browser-warning": "true", "User-Agent": "AZT_Client/2.0"}
+        if session_token:
+            headers["Authorization"] = f"Bearer {session_token}"
+        return headers
+
     def request(self, method, path, token="", **kwargs):
-        headers = {"ngrok-skip-browser-warning": "true"}
-        if token:
-            headers["Authorization"] = f"Bearer {token}"
+        headers = self._headers(token)
         try:
             response = httpx.request(method, self.profile.server_url.rstrip("/") + path,
                                      headers=headers, timeout=self.timeout, **kwargs)
@@ -62,6 +67,9 @@ class GoldAIServer:
 
     def risk_policy(self, token):
         return self.request("GET", "/v1/client/risk-policy", token)
+
+    def subscription(self, session_token):
+        return self.request("GET", "/v1/mobile/subscription", session_token)
 
     def overview(self, token): return self.request("GET", "/v1/azt/overview", token)
     def messages(self, token): return self.request("GET", "/v1/azt/messages", token)

@@ -243,7 +243,7 @@ def execute_instruction(
         price,
         sl,
         float(risk_per_trade_pct),
-        min(float(max_open_risk_pct), float(max_single_risk_pct)),
+        min(float(risk_per_trade_pct), float(max_open_risk_pct), float(max_single_risk_pct), 2.0),
     )
     if volume <= 0:
         return ExecutionResult(
