@@ -1,4 +1,10 @@
-# GOLD_AI Client
+# AGORA ZION TRADER (AZT) Client
+
+The current Windows app is `dist_azt/AZT_Client.exe`. Read [AZT_CLIENT.md](AZT_CLIENT.md) for account setup, subscriptions, payments, messages, reconnect behavior and build/test commands. Existing local profiles are preserved.
+
+The notes below describe the earlier GOLD_AI client and are retained as historical context.
+
+## Earlier client design
 
 Thin Windows execution client for GOLD_AI Level-2 protection.
 

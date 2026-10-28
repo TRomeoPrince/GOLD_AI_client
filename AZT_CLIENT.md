@@ -1,5 +1,9 @@
 # AGORA ZION TRADER Client
 
+Verified release: 28 October 2026. The final source includes the existing upstream main history through c409e0f and the AZT merge e07b483. Validation: 33 client tests, responsive source/frozen checks and the isolated real client/server API contract passed. No live orders were placed. Final Windows EXE SHA256: DA2951C1A804C3E7398EE711F76C073CF724B151E2B9F9BCCF7B5B507B8C91D9.
+
+The server durably reserves a delivery before returning it and allows only one unresolved dispatch per MT5 account. A lost response is never automatically replayed. After an unresolved dispatch, Admin must reconcile the actual broker history in Clients → Accounts → Execution Review, then mark it reviewed; this permits fresh signals without resending the old one. Other authorized accounts continue independently.
+
 AZT Client keeps protected strategies on the owner server. This customer application authorizes each MT5 account, displays its subscription/messages/trades/journal, and executes only fresh authorized instructions on the selected local terminal.
 
 ## Start and setup
