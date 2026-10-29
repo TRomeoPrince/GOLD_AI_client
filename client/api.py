@@ -28,8 +28,12 @@ class GoldAIServer:
         try:
             response = httpx.request(method, self.profile.server_url.rstrip("/") + path,
                                      headers=headers, timeout=self.timeout, **kwargs)
-        except (httpx.TimeoutException, httpx.NetworkError):
-            raise ServerUnavailable("AZT server is unreachable; reconnecting automatically.") from None
+        except httpx.TimeoutException:
+            raise ServerUnavailable("AZT server request timed out; reconnecting automatically.") from None
+        except httpx.TransportError:
+            # Includes RemoteProtocolError: the remote server closed the connection
+            # without returning an HTTP response (common during tunnel restarts).
+            raise ServerUnavailable("AZT server connection was interrupted; reconnecting automatically.") from None
         if response.status_code == 401:
             raise SessionExpired("Session expired; authorizing again.")
         if response.status_code == 403:
