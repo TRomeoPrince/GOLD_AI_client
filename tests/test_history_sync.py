@@ -15,6 +15,9 @@ class HistorySyncTests(unittest.TestCase):
         api.DEAL_TYPE_SELL=1
         api.DEAL_ENTRY_IN=0
         api.DEAL_ENTRY_OUT=1
+        api.DEAL_ENTRY_INOUT=2
+        api.DEAL_ENTRY_OUT_BY=3
+        api.DEAL_REASON_SL, api.DEAL_REASON_TP, api.DEAL_REASON_SO = 4, 5, 6
         api.account_info.return_value=NS(login=123,server="Broker",currency="USC",balance=1000,
                                          equity=1000,margin=0,margin_free=1000)
         api.terminal_info.return_value=NS(connected=True)
@@ -41,7 +44,7 @@ class HistorySyncTests(unittest.TestCase):
         self.assertEqual(trade["position_id"],"500")
         self.assertEqual(trade["strategy"],"M15_BREAKOUT")
         self.assertAlmostEqual(trade["pnl"],5.)
-        self.assertLess(abs((datetime.fromisoformat(trade["closed_utc"])-now).total_seconds()+60,5)
+        self.assertLess(abs((datetime.fromisoformat(trade["closed_utc"]) - (now - timedelta(seconds=60))).total_seconds()), 5)
         self.assertEqual(api.history_deals_get.call_count,2)
         self.assertGreater(api.history_deals_get.call_args_list[0].args[1],now+timedelta(hours=2))
         api.order_send.assert_not_called()
