@@ -29,10 +29,10 @@ class HistorySyncTests(unittest.TestCase):
         shifted=10800
         in_deal=NS(ticket=15,position_id=500,symbol="XAUUSD.m",type=0,entry=0,
                    volume=.05,price=4050.,profit=0.,commission=0.,swap=0.,fee=0.,
-                   time=now.timestamp()+shift-3600,comment="AZT:M15_BREAKOUT")
+                   time=now.timestamp()+shifted-3600,comment="AZT:M15_BREAKOUT")
         out_deal=NS(ticket=16,position_id=500,symbol="XAUUSD.m",type=1,entry=1,
                     volume=.05,price=4051.,profit=5.,commission=0.,swap=0.,fee=0.,
-                    time=now.timestamp()+shift-60,reason=5,comment="")
+                    time=now.timestamp()+shifted-60,reason=5,comment="")
         api=self.api()
         api.history_deals_get.side_effect=lambda start,end:[
             d for d in (in_deal,out_deal) if start.timestamp() <= d.time <= end.timestamp()
