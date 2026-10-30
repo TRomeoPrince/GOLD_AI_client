@@ -102,7 +102,7 @@ class RuntimeTests(unittest.TestCase):
     def signal(self,age=0):
         return {"setup_time":datetime.fromtimestamp(runtime.time.time()-age,timezone.utc).isoformat(),"market":"GOLD","direction":"BUY","stop_loss":90,"take_profit":110}
     def instruction(self):
-        return {"instruction_id":1,"signal_key":"signal","created_utc":datetime.now(timezone.utc).isoformat(),"payload":self.signal()}
+        return {"instruction_id":1,"signal_key":"signal","created_utc":datetime.fromtimestamp(self.worker.since+1, timezone.utc).isoformat(),"payload":self.signal()}
     def test_fresh_signals_pass_but_stale_future_and_naive_are_rejected(self):
         runtime.validate_signal(self.signal(age=10))
         for payload in (self.signal(age=1201),self.signal(age=-61),{"setup_time":"2026-10-26T12:00:00"}):
