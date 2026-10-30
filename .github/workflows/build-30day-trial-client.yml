@@ -1,0 +1,31 @@
+name: Build AZT 30-day Distributor Trial Client
+on:
+  push:
+    branches: [feature/utc-30day-trial-client-20261030]
+  workflow_dispatch:
+jobs:
+  build-trial:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install distribution dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+      - name: Test client safety and compile
+        run: |
+          python -m compileall -q client app.py
+          python -m unittest discover -s tests -v
+      - name: Build protected-strategy-free 30-day trial EXE
+        run: python -m PyInstaller --clean --noconfirm --distpath dist_trial --workpath build/trial_client_pyi build/AZT_Trial_Client.spec
+      - name: Upload standalone Windows Client executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: AZT-30-Day-Trial-Client-Windows
+          path: dist_trial/AZT_Trial_Client.exe
+          if-no-files-found: error
+          retention-days: 30
