@@ -30,14 +30,20 @@ The legacy local profile directory is retained: %USERPROFILE%\.gold_ai_client. P
 
 ## Verification/build
 
+The November 4 rebuild includes automatic recovery from interrupted HTTP responses and UTC-normalized MT5 history. If the full history query fails, the Client tries a two-day window and reports whether history is partial or unavailable. Open positions keep refreshing while the owner retains previously recorded closed deals. Existing order checks still require complete risk data.
+
+The distributor build is named `AZT_Trial_Client.exe`. Use an owner-issued pairing code to activate a 30-day trial on the first authorized MT5 pairing. The owner server controls the UTC expiry and whether the account may trade. Both builds share the Windows Client profile and account controls.
+
 Run from this repository:
 
 ```powershell
 .venv\Scripts\python.exe -m unittest discover -s tests -v
 .venv\Scripts\python.exe tests\smoke_client_exe.py --source
-.venv\Scripts\python.exe -m PyInstaller --clean --noconfirm --distpath dist_azt --workpath build/azt_pyi build/GOLD_AI_Client.spec
-$env:AZT_TEST_EXE = 'C:\Users\USER\Desktop\Bots\GOLD_AI_client\dist_azt\AZT_Client.exe'
+.venv\Scripts\python.exe -m PyInstaller --noconfirm --distpath dist_rebuild_20261104 --workpath build/rebuild_20261104_pyi build/GOLD_AI_Client.spec
+$env:AZT_TEST_EXE = 'C:\Users\USER\Desktop\Bots\GOLD_AI_client\dist_rebuild_20261104\AZT_Client.exe'
 .venv\Scripts\python.exe tests\smoke_client_exe.py
 ```
 
-The smoke path uses a private empty profile, mock display data and no server/MT5/order calls. tests/integration_contract.py accepts the owner repository path and runs the real client API wrapper against an in-process FastAPI server with a temporary database; no external network or MT5 is involved.
+Build the distributor edition with `.venv\Scripts\python.exe -m PyInstaller --noconfirm --distpath dist_rebuild_20261104 --workpath build/rebuild_20261104_pyi build/AZT_Trial_Client.spec`. Point `AZT_TEST_EXE` at the resulting EXE to run the same isolated smoke check.
+
+The smoke path uses a private empty profile and mock display data. `tests/integration_contract.py` accepts the current owner repository path and runs the real client API wrapper against an in-process FastAPI server with a temporary database. It verifies the trial lease and the positions/history fallback without contacting MT5 or an external network.

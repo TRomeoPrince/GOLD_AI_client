@@ -39,13 +39,14 @@ class HistorySyncTests(unittest.TestCase):
         ]
         result=capture_mt5(api,clock_offset_seconds=shifted)
         self.assertEqual(result["history_sync"],"OK")
+        self.assertEqual(result["history_window_failures"],0)
         self.assertEqual(len(result["trades"]),1)
         trade=result["trades"][0]
         self.assertEqual(trade["position_id"],"500")
         self.assertEqual(trade["strategy"],"M15_BREAKOUT")
         self.assertAlmostEqual(trade["pnl"],5.)
         self.assertLess(abs((datetime.fromisoformat(trade["closed_utc"]) - (now - timedelta(seconds=60))).total_seconds()), 5)
-        self.assertEqual(api.history_deals_get.call_count,2)
+        api.history_deals_get.assert_called_once()
         self.assertGreater(api.history_deals_get.call_args_list[0].args[1],now+timedelta(hours=2))
         api.order_send.assert_not_called()
         api.initialize.assert_not_called()

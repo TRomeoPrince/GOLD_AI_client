@@ -49,6 +49,7 @@ def capture_mt5(api, *, clock_offset_seconds=0, lookback_days=30):
             if ticket is None:
                 continue
             deals_by_ticket[str(ticket)] = deal
+        break
     deals = sorted(deals_by_ticket.values(), key=lambda item: (getattr(item, "time", 0), getattr(item, "ticket", 0)))
     history_status = "OK" if failed_windows == 0 else "DEGRADED" if failed_windows < len(periods) else "UNAVAILABLE"
     # Even when both history ranges fail, open positions must be refreshed;

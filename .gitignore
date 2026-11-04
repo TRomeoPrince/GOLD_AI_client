@@ -3,7 +3,9 @@ __pycache__/
 *.pyc
 build/pyi/
 build/azt_pyi/
+build/rebuild_20261104_pyi/
 dist/
 dist_azt/
+dist_rebuild_20261104/
 release/
 .env
