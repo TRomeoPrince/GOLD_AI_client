@@ -1,4 +1,4 @@
-GOLD_AI CLIENT V0.1
+AGORA ZION TRADER (AZT) CLIENT
 
 REQUIREMENTS
 - Windows PC
@@ -9,20 +9,18 @@ REQUIREMENTS
 
 SETUP
 1. Open MetaTrader 5 and log into your account.
-2. Open GOLD_AI_Client.exe.
-3. Click Detect MT5.
-4. Enter the Server URL supplied by GOLD_AI.
-5. Enter your Pairing Code.
-6. Optional: enter your Telegram username and enable Telegram notifications.
-7. Click Connect / Authorize.
-8. Keep MT5 and GOLD_AI Client running.
+2. Open AZT_Client.exe.
+3. On Dashboard, add an account and choose Browse / Detect to select MT5.
+4. Confirm the MT5 login and broker server.
+5. Enter the server URL and pairing code supplied by your AZT administrator.
+6. Save the account and select Connect / Refresh to view your access status.
+7. Select Start Automated Trading when you want to enable trading.
+8. Keep MT5 and AZT Client running while trading is enabled.
 
 TELEGRAM
-If Telegram notifications are enabled, send /start to:
-@Princetradingbot
+Ask your AZT administrator which bot to use for your account.
 
 IMPORTANT
-- GOLD_AI Client contains no protected strategy logic.
-- Trade instructions come from the protected GOLD_AI owner server.
+- The AZT owner server generates trade instructions.
 - Your broker-side SL and TP remain on MT5 after a trade is opened.
-- If access is paused/revoked, no new GOLD_AI instructions are accepted.
+- The client blocks new trade instructions when access is paused or revoked.
