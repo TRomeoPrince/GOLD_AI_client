@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from math import floor, isfinite
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import time
 
 import MetaTrader5 as mt5
-from .clock import tick_utc_epoch
+from .clock import tick_epoch, tick_utc_epoch
 from .symbols import resolve_symbol
 
 MAGIC = 560090
@@ -102,14 +102,15 @@ def _open_risk_pct(include_all_positions=False) -> float:
     return 100.0 * total / equity
 
 
-def _daily_profit_pct(strict=False) -> float:
+def _daily_profit_pct(strict=False, *, clock_offset_seconds=0) -> float:
     account = mt5.account_info()
     if account is None or not isfinite(float(account.equity)) or not isfinite(float(account.balance)):
         return float("inf")
 
     now = datetime.now(timezone.utc)
     start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    deals = mt5.history_deals_get(start, now)
+    offset = timedelta(seconds=clock_offset_seconds)
+    deals = mt5.history_deals_get(start + offset, now + offset)
     if strict and deals is None:
         raise RuntimeError("Daily MT5 history unavailable; order blocked.")
     deals = deals or ()
@@ -125,20 +126,21 @@ def _daily_profit_pct(strict=False) -> float:
     if not isfinite(realized) or not isfinite(start_balance):
         return float("inf")
     if start_balance <= 0:
-        return 0.0
+        return float("inf")
 
     profit_cash = max(0.0, float(account.equity) - start_balance)
     return 100.0 * profit_cash / start_balance
 
 
-def _daily_loss_pct(strict=False) -> float:
+def _daily_loss_pct(strict=False, *, clock_offset_seconds=0) -> float:
     account = mt5.account_info()
     if account is None or not isfinite(float(account.equity)) or not isfinite(float(account.balance)):
         return float("inf")
 
     now = datetime.now(timezone.utc)
     start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    deals = mt5.history_deals_get(start, now)
+    offset = timedelta(seconds=clock_offset_seconds)
+    deals = mt5.history_deals_get(start + offset, now + offset)
     if strict and deals is None:
         raise RuntimeError("Daily MT5 history unavailable; order blocked.")
     deals = deals or ()
@@ -191,22 +193,8 @@ def execute_instruction(
     if not bool(getattr(terminal, "trade_allowed", False)):
         return ExecutionResult(False, None, "Algo Trading is disabled.")
 
-    if bool(daily_profit_target_enabled):
-        daily_profit = _daily_profit_pct(strict_history)
-        if daily_profit >= float(daily_profit_target_pct):
-            return ExecutionResult(
-                False,
-                None,
-                f"DAILY_PROFIT_TARGET_REACHED: {daily_profit:.2f}% >= {float(daily_profit_target_pct):.2f}%.",
-            )
-
-    daily_loss = _daily_loss_pct(strict_history)
-    if daily_loss >= float(max_daily_loss_pct):
-        return ExecutionResult(
-            False,
-            None,
-            f"DAILY_LOSS_BLOCKED: {daily_loss:.2f}% >= {float(max_daily_loss_pct):.2f}%.",
-        )
+    if daily_profit_target_enabled and (not isfinite(float(daily_profit_target_pct)) or float(daily_profit_target_pct) <= 0):
+        return ExecutionResult(False, None, "Invalid daily profit target; order blocked.")
 
     direction = str(payload["direction"]).upper()
     if direction not in {"BUY", "SELL"}:
@@ -220,13 +208,28 @@ def execute_instruction(
     if tick is None:
         return ExecutionResult(False, None, f"No live tick for {symbol}.")
 
+    clock_offset = 0
     if strict_history:
         try:
-            quote_age = time.time() - tick_utc_epoch(mt5, symbol, tick)
+            quote_utc = tick_utc_epoch(mt5, symbol, tick)
+            quote_age = time.time() - quote_utc
+            clock_offset = round(tick_epoch(tick) - quote_utc)
         except RuntimeError as exc:
             return ExecutionResult(False, None, f"STALE_QUOTE: {exc}")
         if not -5 <= quote_age <= 120:
             return ExecutionResult(False, None, "STALE_QUOTE: no recent broker tick.")
+
+    # The day is defined in UTC. The broker history query takes feed-clock
+    # bounds, as does telemetry, so include today's shifted recent deals.
+    if daily_profit_target_enabled:
+        daily_profit = _daily_profit_pct(strict_history, clock_offset_seconds=clock_offset)
+        if daily_profit >= float(daily_profit_target_pct):
+            return ExecutionResult(False, None,
+                f"DAILY_PROFIT_TARGET_REACHED: {daily_profit:.2f}% >= {float(daily_profit_target_pct):.2f}%.")
+    daily_loss = _daily_loss_pct(strict_history, clock_offset_seconds=clock_offset)
+    if daily_loss >= float(max_daily_loss_pct):
+        return ExecutionResult(False, None,
+            f"DAILY_LOSS_BLOCKED: {daily_loss:.2f}% >= {float(max_daily_loss_pct):.2f}%.")
 
     price = float(tick.ask if direction == "BUY" else tick.bid)
     valid = sl < price < tp if direction == "BUY" else tp < price < sl

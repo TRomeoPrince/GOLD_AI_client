@@ -30,6 +30,10 @@ The legacy local profile directory is retained: %USERPROFILE%\.gold_ai_client. P
 
 ## Verification/build
 
+The November 9 recovery build reauthorizes after an outage, advances the cutoff before requesting a reserved delivery, and validates the complete risk policy again just before submission. Daily loss and profit checks query the UTC day using the calibrated broker clock. Worker status distinguishes a process that is starting, a worker that exited, and an overdue heartbeat, with allowance for configured reconnect backoff.
+
+The recovery Client EXE is built in `dist_rebuild_20261109` with the existing `build/GOLD_AI_Client.spec`. The simulated contract now runs the actual Client runtime and order guard against the owner API and a mock MT5 adapter, covering the outage, fresh reservation, risk approval, durable acknowledgment, and duplicate suppression.
+
 The November 4 rebuild includes automatic recovery from interrupted HTTP responses and UTC-normalized MT5 history. If the full history query fails, the Client tries a two-day window and reports whether history is partial or unavailable. Open positions keep refreshing while the owner retains previously recorded closed deals. Existing order checks still require complete risk data.
 
 The distributor build is named `AZT_Trial_Client.exe`. Use an owner-issued pairing code to activate a 30-day trial on the first authorized MT5 pairing. The owner server controls the UTC expiry and whether the account may trade. Both builds share the Windows Client profile and account controls.

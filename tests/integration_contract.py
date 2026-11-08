@@ -1,8 +1,11 @@
 """Run with owner .venv Python; all server records live in a temporary database."""
 import os
+import json
 from pathlib import Path
 import sys
 import tempfile
+import threading
+import time
 from datetime import datetime,timedelta,timezone
 from types import SimpleNamespace
 from unittest.mock import Mock,patch
@@ -21,7 +24,10 @@ with tempfile.TemporaryDirectory(prefix="azt-contract-") as folder:
     from server.app import app
     from fastapi.testclient import TestClient
     from client.api import ClientAccessRevoked,GoldAIServer
+    from client import executor,runtime
+    from client.ledger import Ledger
     from client.models import ClientProfile
+    import httpx
     from client.telemetry import capture_mt5
     client,code=store.create_client("Contract client")
     azt_store.save_plan("STARTER",name="Starter",amount=20,currency="USD",duration_days=30,max_mt5_accounts=2)
@@ -80,6 +86,77 @@ with tempfile.TemporaryDirectory(prefix="azt-contract-") as folder:
         mt5.initialize.assert_not_called()
         mt5.order_send.assert_not_called()
 
+        # Exercise actual recovery, durable owner reservation, Client risk
+        # approval, mock broker submission and ACK through the real API.
+        account = {"id":"contract","mt5_login":123,"mt5_server":"Broker","desired_running":True}
+        stop = threading.Event()
+        ledger = Ledger(Path(folder)/"execution_ledger.db")
+        states = []
+        deliveries = []
+        polls = [0]
+        waits = [0]
+
+        def report(**state):
+            states.append(state)
+            if state.get("message", "").startswith("EXECUTED:"):
+                stop.set()
+
+        def bounded_wait(_delay):
+            waits[0] += 1
+            if waits[0] >= 6:
+                stop.set()
+            return stop.is_set()
+
+        def payload():
+            return json.dumps({"setup_time":runtime.utc_now(),"market":"GOLD","direction":"BUY",
+                               "stop_loss":1995,"take_profit":2010,"strategy_id":"CONTRACT"})
+
+        def recovering_request(method, url, **kwargs):
+            path = url.split("testserver",1)[1]
+            if path == "/v1/instructions/next":
+                polls[0] += 1
+                if polls[0] == 1:
+                    raise httpx.RemoteProtocolError("simulated owner outage")
+                if polls[0] == 2:
+                    assert store.enqueue_instruction(client.id,"contract-fresh",payload())
+                response = request(method,url,**kwargs)
+                if response.json().get("available"):
+                    deliveries.append(response.json())
+                return response
+            if path == "/v1/client/authorize":
+                assert store.enqueue_instruction(client.id,"contract-backlog",payload())
+            return request(method,url,**kwargs)
+
+        broker = Mock(ORDER_TYPE_BUY=0,TRADE_ACTION_DEAL=1,ORDER_TIME_GTC=0,
+                      ORDER_FILLING_FOK=0,ORDER_FILLING_IOC=1,ORDER_FILLING_RETURN=2,
+                      TRADE_RETCODE_DONE=10009,TRADE_RETCODE_DONE_PARTIAL=10010)
+        broker.account_info.return_value = SimpleNamespace(login=123,server="Broker",equity=1000,
+                                                            balance=1000,currency="USC",trade_allowed=True,trade_expert=True)
+        broker.terminal_info.return_value = SimpleNamespace(connected=True,trade_allowed=True,tradeapi_disabled=False)
+        broker.symbol_info_tick.side_effect = lambda _symbol: SimpleNamespace(ask=2000,bid=1999.9,time=time.time())
+        broker.symbol_info.return_value = SimpleNamespace(volume_min=.01,volume_max=1,volume_step=.01,filling_mode=1)
+        broker.history_deals_get.return_value = []
+        broker.positions_get.return_value = []
+        broker.order_calc_profit.side_effect = lambda _side,_symbol,volume,_entry,_sl: -500*volume
+        broker.order_check.return_value = SimpleNamespace(retcode=0)
+        broker.order_send.return_value = SimpleNamespace(retcode=10009,order=12345,comment="mock execution")
+        worker = runtime.ClientRuntime(profile,account,stop,api=api,ledger=ledger,report=report)
+        worker.clock = SimpleNamespace(offset_seconds=0)
+        worker.token = token
+        worker.last_telemetry = time.time()
+        with patch("client.api.httpx.request",side_effect=recovering_request),patch.object(stop,"wait",side_effect=bounded_wait),patch.object(runtime,"mt5",broker),patch.object(executor,"mt5",broker),patch.object(executor,"_resolve_symbol",return_value="XAUUSD.m"),patch.object(executor,"tick_utc_epoch",side_effect=lambda _api,_symbol,tick:tick.time):
+            worker.run()
+            assert deliveries and len(deliveries)==1 and deliveries[0]["signal_key"]=="contract-fresh", deliveries
+            broker.order_send.assert_called_once()
+            assert broker.order_send.call_args.args[0]["volume"]==.01,broker.order_send.call_args
+            worker.process(deliveries[0])
+            broker.order_send.assert_called_once()
+        assert [row["state"] for row in states if row["state"] in {"RECONNECTING","RECOVERED"}]==["RECONNECTING","RECOVERED"],states
+        saved, = azt_store.instruction_deliveries(client.id)
+        assert saved["status"]=="EXECUTED" and saved["signal_key"]=="contract-fresh",saved
+        assert not ledger.pending_acks(worker.key)
+        broker.initialize.assert_not_called()
+
         # Both EXEs use this same authorization flow. Expiry is enforced by the
         # owner server even for a token obtained before the 30-day deadline.
         trial,trial_code=store.create_client("Trial contract client")
@@ -101,4 +178,4 @@ with tempfile.TemporaryDirectory(prefix="azt-contract-") as folder:
             else:
                 raise AssertionError("Expired distributor trial received trading access")
     server.close()
-    print("Client/server contract passed: authorization, payments, referrals, no-backlog query, unavailable-history recovery and one-time UTC trial expiry. No MT5 or external network calls.")
+    print("Client/server contract passed: authorization, payments, referrals, history recovery, trial expiry, outage recovery, fresh reservation, mock execution, acknowledgment and duplicate suppression. No live MT5 or external network calls.")

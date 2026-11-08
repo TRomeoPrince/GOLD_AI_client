@@ -443,7 +443,7 @@ class GoldAIClientApp(tk.Tk):
                 account["desired_running"]=False;save_profile(self.profile);self.status.set(runtime.get("message","Trading access disabled."))
             self.start_button.configure(state="disabled" if account.get("desired_running") else "normal")
             self.stop_button.configure(state="normal" if account.get("desired_running") else "disabled")
-            if account.get("desired_running") and runtime.get("state") in {"RECONNECTING","DEGRADED","RECOVERED","FAILED","STOPPING"}:
+            if account.get("desired_running") and runtime.get("state") in {"RECONNECTING","DEGRADED","RECOVERED","FAILED","STALE","STOPPING"}:
                 self.status.set(runtime.get("message",runtime["state"]))
         sub=self.overview_data.get("subscription",{})
         self.expiry.set(remaining_text(sub.get("expires_utc",""))+" • "+display_time(sub.get("expires_utc"),self.profile.display_timezone))

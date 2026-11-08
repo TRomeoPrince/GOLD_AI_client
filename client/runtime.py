@@ -42,6 +42,26 @@ def validate_signal(payload, *, now=None):
     if age < -60 or age > 20 * 60:
         raise ValueError("Signal outside its permitted age (20 minutes / 60 seconds future).")
 
+
+def validate_risk_policy(data):
+    """Accept only the current, complete owner risk-policy response."""
+    if not isinstance(data, dict):
+        raise ValueError("Risk policy response must be an object.")
+    policy = {}
+    for field in ("news_lock", "daily_profit_target_enabled"):
+        value = data.get(field)
+        if type(value) is not bool:
+            raise ValueError(f"Risk policy has an invalid {field}.")
+        policy[field] = value
+    for field in ("risk_per_trade_pct", "max_open_risk_pct", "max_daily_loss_pct",
+                  "max_single_risk_pct", "daily_profit_target_pct"):
+        value = data.get(field)
+        allow_zero = field == "daily_profit_target_pct" and not policy["daily_profit_target_enabled"]
+        if type(value) not in (int, float) or not math.isfinite(value) or value < 0 or (value == 0 and not allow_zero):
+            raise ValueError(f"Risk policy has an invalid {field}.")
+        policy[field] = float(value)
+    return policy
+
 def account_key(account): return f"{account['mt5_server']}|{int(account['mt5_login'])}"
 def status_path(account_id): return APP_DIR / "runtime" / (str(account_id) + ".json")
 def account_lock_path(account):
@@ -111,25 +131,26 @@ class ClientRuntime:
             else:
                 validate_signal(payload)
                 connection_account(self.account,trading=True)
-                policy=self.api.risk_policy(self.token)
-                if policy.get("news_lock"): raise ValueError("News Lock blocks new entries.")
+                policy=validate_risk_policy(self.api.risk_policy(self.token))
+                if policy["news_lock"]: raise ValueError("News Lock blocks new entries.")
                 def guard():
                     if self.stop.is_set(): raise SafetyStop("Trading was stopped before submission.")
                     connection_account(self.account,trading=True)
                     validate_signal(payload)
-                    latest=self.api.risk_policy(self.token)
-                    if latest.get("news_lock"): raise SafetyStop("News Lock enabled before submission.")
-                    for field in ("risk_per_trade_pct","max_open_risk_pct","max_daily_loss_pct","daily_profit_target_enabled","daily_profit_target_pct"):
-                        if latest.get(field)!=policy.get(field): raise SafetyStop("Risk policy changed; instruction skipped before submission.")
+                    latest=validate_risk_policy(self.api.risk_policy(self.token))
+                    if latest["news_lock"]: raise SafetyStop("News Lock enabled before submission.")
+                    if latest != policy:
+                        raise SafetyStop("Risk policy changed; instruction skipped before submission.")
                     # Stop/account changes can arrive while the final HTTP check
                     # is in flight. Recheck after it, immediately before IPC send.
                     if self.stop.is_set(): raise SafetyStop("Trading was stopped before submission.")
                     connection_account(self.account,trading=True)
                     validate_signal(payload)
-                result=execute_instruction(payload,float(policy["risk_per_trade_pct"]),
-                    min(40,float(policy["max_open_risk_pct"])),min(10,float(policy["max_daily_loss_pct"])),
-                    bool(policy.get("daily_profit_target_enabled",False)),float(policy.get("daily_profit_target_pct",0)),
-                    max_single_risk_pct=2,before_send=guard,include_all_positions=True,strict_history=True)
+                result=execute_instruction(payload,policy["risk_per_trade_pct"],
+                    min(40,policy["max_open_risk_pct"]),min(10,policy["max_daily_loss_pct"]),
+                    policy["daily_profit_target_enabled"],policy["daily_profit_target_pct"],
+                    max_single_risk_pct=min(2,policy["max_single_risk_pct"]),before_send=guard,
+                    include_all_positions=True,strict_history=True)
                 state="EXECUTED" if result.sent else "REJECTED"
                 message=f"{result.message}; ticket={result.ticket}; volume={result.volume}; risk={result.planned_risk_pct:.3f}%"
         except (ValueError,ClientAccessRevoked) as exc:
@@ -157,20 +178,25 @@ class ClientRuntime:
                         connection_account(self.account)
                         self.clock=BrokerClock.detect(mt5,resolve_symbol(mt5,"GOLD"))
                         self.reset_cutoff()
-                    if not self.token:
+                    new_session = not self.token or self.had_failure
+                    if new_session:
                         authorization=self.api.authorize()
                         self.token=authorization.session_token
-                        if not authorization.allowed: raise ClientAccessRevoked(authorization.message)
+                        if authorization.allowed is not True: raise ClientAccessRevoked(authorization.message)
                         if not self.token: raise ClientAccessRevoked("Server returned no authorized session.")
                     connection_account(self.account)
                     self.flush_acks()
+                    if self.stop.is_set():
+                        break
+                    if new_session:
+                        # Only fetch after authorization and ACK recovery confirm
+                        # connectivity. The owner reserves an available delivery,
+                        # so a received response must reach the normal claim path.
+                        self.reset_cutoff()
                     data=self.api.next_instruction(self.token,datetime.fromtimestamp(self.since,timezone.utc).isoformat())
                     if self.had_failure:
-                        self.reset_cutoff()
                         self.report(state="RECOVERED",server_state="RECOVERED",mt5_state="CONNECTED",message="Connection recovered. Old queued trades will not be executed.")
                         self.had_failure=False
-                        self.failures=0
-                        continue  # Discard first response obtained using the outage cutoff.
                     self.failures=0
                     if data.get("available"): self.process(data)
                     if time.time()-self.last_telemetry>=15:
@@ -178,15 +204,13 @@ class ClientRuntime:
                         self.last_telemetry=time.time()
                     self.report(state="CONNECTED",server_state="CONNECTED",mt5_state="CONNECTED",message="Waiting for fresh AZT signals.")
                     self.stop.wait(1)
-                except SessionExpired:
-                    self.token=""
-                    self.had_failure=True
-                    self.reset_cutoff()
                 except (ClientAccessRevoked,SafetyStop) as exc:
                     set_desired_state(self.account["id"],False)
                     self.report(state="ACCESS_DISABLED",server_state="CONNECTED",mt5_state="BLOCKED",desired=False,message=str(exc))
                     return
                 except Exception as exc:
+                    if isinstance(exc,SessionExpired):
+                        self.token=""
                     self.failures+=1
                     self.had_failure=True
                     self.reset_cutoff()
@@ -199,7 +223,7 @@ class ClientRuntime:
                         alert="Connection needs attention; retries remain enabled. "
                         self.last_alert=time.time()
                     self.report(state=state,server_state=state,mt5_state="RECONNECTING" if self.clock is None else "CONNECTED",
-                                message=alert+str(exc)[:500]+f" Retry in {delay:g}s.")
+                                message=alert+str(exc)[:500]+f" Retry in {delay:g}s.",retry_in=delay)
                     self.stop.wait(delay)
         finally:
             mt5.shutdown()

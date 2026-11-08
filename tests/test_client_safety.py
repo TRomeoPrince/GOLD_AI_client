@@ -13,6 +13,10 @@ from client.models import ClientProfile,AuthorizationResult
 from client.symbols import resolve_symbol
 from client.timezones import display_time,valid_zone
 
+POLICY = {"risk_per_trade_pct": .9, "max_open_risk_pct": 40, "max_daily_loss_pct": 5,
+          "max_single_risk_pct": 2, "news_lock": False,
+          "daily_profit_target_enabled": False, "daily_profit_target_pct": 0}
+
 class Stop:
     def __init__(self):self.flag=False;self.waits=[]
     def is_set(self):return self.flag
@@ -117,7 +121,7 @@ class RuntimeTests(unittest.TestCase):
         execute.assert_not_called();self.api.acknowledge.assert_called_once()
         self.assertEqual(self.api.acknowledge.call_args.args[2],"SKIPPED")
     def test_stop_during_final_server_policy_request_blocks_order_submission(self):
-        policy={"risk_per_trade_pct":.9,"max_open_risk_pct":40,"max_daily_loss_pct":5}
+        policy=POLICY
         count=[0]
         def risk_policy(_token):
             count[0]+=1
@@ -131,8 +135,32 @@ class RuntimeTests(unittest.TestCase):
         with patch.object(runtime,"connection_account"),patch.object(runtime,"execute_instruction",side_effect=execute):
             with self.assertRaises(runtime.SafetyStop):self.worker.process(self.instruction())
         send.assert_not_called()
+    def test_incomplete_or_nonfinite_policy_cannot_authorize_sizing(self):
+        for policy in ({key: value for key, value in POLICY.items() if key != "daily_profit_target_enabled"},
+                       {**POLICY, "daily_profit_target_enabled": True, "daily_profit_target_pct": float("nan")}):
+            with self.subTest(policy=policy):
+                self.api.risk_policy.return_value = policy
+                self.api.acknowledge.reset_mock()
+                data = self.instruction()
+                data["signal_key"] = f"policy-{len(self.status)}"
+                with patch.object(runtime,"connection_account"),patch.object(runtime,"execute_instruction") as execute:
+                    self.worker.process(data)
+                execute.assert_not_called()
+                self.assertEqual(self.api.acknowledge.call_args.args[2], "SKIPPED")
+    def test_incomplete_final_policy_cannot_reach_order_send(self):
+        self.api.risk_policy.side_effect = [POLICY, {key: value for key, value in POLICY.items() if key != "news_lock"}]
+        send = Mock()
+
+        def execute(*_args, **kwargs):
+            kwargs["before_send"]()
+            send()
+
+        with patch.object(runtime,"connection_account"),patch.object(runtime,"execute_instruction",side_effect=execute):
+            self.worker.process(self.instruction())
+        send.assert_not_called()
+        self.assertEqual(self.api.acknowledge.call_args.args[2], "SKIPPED")
     def test_ambiguous_order_and_failed_ack_never_resubmit_after_restart(self):
-        data=self.instruction();self.api.risk_policy.return_value={"risk_per_trade_pct":.9,"max_open_risk_pct":40,"max_daily_loss_pct":5}
+        data=self.instruction();self.api.risk_policy.return_value=POLICY
         self.api.acknowledge.side_effect=[ServerUnavailable("offline"),{}]
         with patch.object(runtime,"connection_account"),patch.object(runtime,"execute_instruction",side_effect=RuntimeError("MT5 returned no confirmation")) as execute:
             with self.assertRaises(ServerUnavailable):self.worker.process(data)
@@ -148,13 +176,35 @@ class RuntimeTests(unittest.TestCase):
         self.assertTrue(self.worker.ledger.claim("Broker|123","key",1))
         again=Ledger(Path(self.folder.name)/"test.db")
         self.assertFalse(again.claim("Broker|123","key",1));self.assertTrue(again.claim("Broker|456","key",1))
-    def test_network_recovery_keeps_desired_on_and_discards_outage_response(self):
-        self.worker.token="";self.api.next_instruction.side_effect=[ServerUnavailable("offline"),{"available":True,"instruction_id":1},{"available":True,"instruction_id":2}]
-        def process(data):self.assertEqual(data["instruction_id"],2);self.stop.set()
-        with patch.object(runtime.mt5,"shutdown"),patch.object(runtime.mt5,"initialize",return_value=True),patch.object(runtime,"connection_account"),patch.object(runtime.BrokerClock,"detect",return_value=NS(offset_seconds=0)),patch.object(runtime,"resolve_symbol",return_value="XAUUSD"),patch.object(runtime,"snapshot",return_value={}),patch.object(self.worker,"process",side_effect=process) as execute:
+    def test_network_recovery_uses_fresh_cutoff_and_processes_reserved_response(self):
+        self.worker.clock = NS(offset_seconds=0)
+        self.worker.since = 100
+        now = [100]
+
+        def authorize():
+            now[0] = 120
+            return AuthorizationResult(True, session_token="recovered")
+
+        def next_instruction(token, cutoff):
+            attempt = self.api.next_instruction.call_count
+            if attempt == 1:
+                now[0] = 110
+                raise ServerUnavailable("offline")
+            if attempt == 2:
+                cutoff_epoch = runtime.epoch(cutoff)
+                # Model the owner reserving the first eligible delivery.
+                return {"available": True, "instruction_id": 1 if cutoff_epoch <= 115 else 2}
+            self.stop.set()
+            return {"available": False}
+
+        self.api.authorize.side_effect = authorize
+        self.api.next_instruction.side_effect = next_instruction
+        with patch.object(runtime.time,"time",side_effect=lambda:now[0]),patch.object(runtime.mt5,"shutdown"),patch.object(runtime,"connection_account"),patch.object(self.worker,"process",side_effect=lambda _:self.stop.set()) as execute:
             self.worker.run()
         self.assertTrue(self.account["desired_running"])
-        self.assertEqual(execute.call_count,1)
+        execute.assert_called_once_with({"available": True, "instruction_id": 2})
+        self.api.authorize.assert_called_once()
+        self.assertEqual(self.api.next_instruction.call_args.args[0], "recovered")
         self.assertIn("RECONNECTING",[row["state"] for row in self.status]);self.assertIn("RECOVERED",[row["state"] for row in self.status])
     def test_mt5_disconnect_reinitializes_and_keeps_desired_state(self):
         self.api.next_instruction.side_effect=[{"available":False},{"available":True,"instruction_id":2}]
@@ -234,6 +284,26 @@ class ApiTests(unittest.TestCase):
             with patch("client.api.httpx.request",return_value=response),self.assertRaises(error):api.overview("private")
 
 class ManagerTests(unittest.TestCase):
+    def test_worker_status_allows_configured_backoff_but_reports_overdue_heartbeat(self):
+        from client import manager
+        with tempfile.TemporaryDirectory() as folder:
+            status = Path(folder)/"one.json"
+            status.write_text(json.dumps({"updated":100,"state":"DEGRADED","retry_in":120}),encoding="utf-8")
+            workers = manager.WorkerManager()
+            with patch.object(manager,"status_path",return_value=status),patch.object(manager.time,"time",return_value=200) as now:
+                self.assertEqual(workers.status("one")["state"], "DEGRADED")
+                now.return_value = 241
+                self.assertEqual(workers.status("one")["state"], "STALE")
+    def test_worker_exit_before_writing_status_is_visible(self):
+        from client import manager
+        process = Mock()
+        workers = manager.WorkerManager()
+        workers.processes["one"] = process
+        with tempfile.TemporaryDirectory() as folder,patch.object(manager,"status_path",return_value=Path(folder)/"missing.json"):
+            process.poll.return_value = None
+            self.assertEqual(workers.status("one")["state"], "STARTING")
+            process.poll.return_value = 1
+            self.assertEqual(workers.status("one")["state"], "FAILED")
     def test_rapid_stop_start_waits_for_prior_exit_then_starts_once(self):
         from client.manager import WorkerManager
         manager=WorkerManager();old=Mock();old.poll.return_value=None;old.stdin.closed=False
@@ -255,12 +325,31 @@ class ManagerTests(unittest.TestCase):
         self.assertNotIn("one",manager.pending)
 
 class ExecutorSafetyTests(unittest.TestCase):
+    def test_shifted_history_realized_loss_is_blocked_before_sizing(self):
+        now = datetime(2026, 11, 8, 13, 0, tzinfo=timezone.utc)
+        raw = now.timestamp() + 7200
+        deal_time = raw - 60
+        tick = NS(ask=100, bid=99, time=raw)
+        terminal = NS(connected=True, trade_allowed=True)
+        account = NS(equity=90, balance=90, currency="USC")
+        payload = {"market": "GOLD", "direction": "BUY", "stop_loss": 90, "take_profit": 110}
+
+        def history(start, end):
+            return [NS(profit=-10)] if start.timestamp() <= deal_time <= end.timestamp() else []
+
+        with patch.object(executor,"datetime") as dt,patch.object(executor.time,"time",return_value=now.timestamp()),patch.object(executor.mt5,"terminal_info",return_value=terminal),patch.object(executor.mt5,"account_info",return_value=account),patch.object(executor.mt5,"history_deals_get",side_effect=history),patch.object(executor,"_resolve_symbol",return_value="GOLD"),patch.object(executor.mt5,"symbol_info_tick",return_value=tick),patch.object(executor,"tick_utc_epoch",return_value=now.timestamp()),patch.object(executor,"_volume_for_risk",return_value=(0,0)) as sizing,patch.object(executor.mt5,"order_send") as send:
+            dt.now.return_value = now
+            result = executor.execute_instruction(payload, max_daily_loss_pct=5)
+        self.assertIn("DAILY_LOSS_BLOCKED", result.message)
+        sizing.assert_not_called()
+        send.assert_not_called()
+
     def test_broker_minimum_above_policy_risk_is_blocked_even_below_two_percent(self):
         account=NS(equity=100,balance=100)
         terminal=NS(connected=True,trade_allowed=True)
         info=NS(volume_min=.01,volume_max=100,volume_step=.01,filling_mode=3)
         payload={"market":"GOLD","direction":"BUY","stop_loss":90,"take_profit":110}
-        with patch.object(executor.mt5,"terminal_info",return_value=terminal),patch.object(executor.mt5,"account_info",return_value=account),patch.object(executor,"_daily_loss_pct",return_value=0),patch.object(executor,"_resolve_symbol",return_value="GOLD"),patch.object(executor.mt5,"symbol_info_tick",return_value=NS(ask=100,bid=99)),patch.object(executor,"tick_utc_epoch",return_value=executor.time.time()),patch.object(executor.mt5,"symbol_info",return_value=info),patch.object(executor.mt5,"order_calc_profit",side_effect=lambda _side,_symbol,volume,_entry,_sl:-150*volume),patch.object(executor.mt5,"order_send") as send:
+        with patch.object(executor.mt5,"terminal_info",return_value=terminal),patch.object(executor.mt5,"account_info",return_value=account),patch.object(executor,"_daily_loss_pct",return_value=0),patch.object(executor,"_resolve_symbol",return_value="GOLD"),patch.object(executor.mt5,"symbol_info_tick",return_value=NS(ask=100,bid=99,time=executor.time.time())),patch.object(executor,"tick_utc_epoch",return_value=executor.time.time()),patch.object(executor.mt5,"symbol_info",return_value=info),patch.object(executor.mt5,"order_calc_profit",side_effect=lambda _side,_symbol,volume,_entry,_sl:-150*volume),patch.object(executor.mt5,"order_send") as send:
             result=executor.execute_instruction(payload,risk_per_trade_pct=.9,max_single_risk_pct=2)
         self.assertFalse(result.sent)
         self.assertIn("RISK_BLOCKED",result.message)
@@ -278,7 +367,7 @@ class ExecutorSafetyTests(unittest.TestCase):
         account=NS(equity=100,balance=100)
         terminal=NS(connected=True,trade_allowed=True)
         payload={"market":"GOLD","direction":"BUY","stop_loss":90,"take_profit":110}
-        with patch.object(executor.mt5,"terminal_info",return_value=terminal),patch.object(executor.mt5,"account_info",return_value=account),patch.object(executor,"_daily_loss_pct",return_value=0),patch.object(executor,"_resolve_symbol",return_value="GOLD"),patch.object(executor.mt5,"symbol_info_tick",return_value=NS(ask=100,bid=99)),patch.object(executor,"tick_utc_epoch",return_value=executor.time.time()),patch.object(executor,"_volume_for_risk",return_value=(.01,.9)),patch.object(executor,"_open_risk_pct",return_value=0),patch.object(executor.mt5,"symbol_info",return_value=NS(filling_mode=3)),patch.object(executor.mt5,"order_check",return_value=NS(retcode=0)),patch.object(executor.mt5,"order_send",return_value=None) as send:
+        with patch.object(executor.mt5,"terminal_info",return_value=terminal),patch.object(executor.mt5,"account_info",return_value=account),patch.object(executor,"_daily_loss_pct",return_value=0),patch.object(executor,"_resolve_symbol",return_value="GOLD"),patch.object(executor.mt5,"symbol_info_tick",return_value=NS(ask=100,bid=99,time=executor.time.time())),patch.object(executor,"tick_utc_epoch",return_value=executor.time.time()),patch.object(executor,"_volume_for_risk",return_value=(.01,.9)),patch.object(executor,"_open_risk_pct",return_value=0),patch.object(executor.mt5,"symbol_info",return_value=NS(filling_mode=3)),patch.object(executor.mt5,"order_check",return_value=NS(retcode=0)),patch.object(executor.mt5,"order_send",return_value=None) as send:
             with self.assertRaisesRegex(RuntimeError,"no result"):executor.execute_instruction(payload)
         send.assert_called_once()
 

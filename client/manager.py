@@ -1,5 +1,6 @@
 from __future__ import annotations
 import json
+import math
 import os
 from pathlib import Path
 import subprocess
@@ -43,14 +44,28 @@ class WorkerManager:
     def status(self, account_id):
         if account_id in self.pending:
             return {"state":"STOPPING","message":"Waiting for the previous worker to stop; the new Start choice is queued."}
+        process=self.processes.get(account_id)
         try:
             data=json.loads(status_path(account_id).read_text(encoding="utf-8"))
-            process=self.processes.get(account_id)
-            data["stale"]=time.time()-float(data.get("updated",0))>45
+            if not isinstance(data, dict):
+                raise ValueError("Account worker status is not an object.")
+            updated = float(data.get("updated", 0))
+            retry_in = float(data.get("retry_in", 0))
+            if not math.isfinite(updated) or not math.isfinite(retry_in):
+                raise ValueError("Account worker status timestamp is invalid.")
+            freshness_limit = max(45, min(300, retry_in) + 20)
+            age = time.time() - updated
+            data["stale"] = not -5 <= age <= freshness_limit
             if process is not None and process.poll() is not None and data.get("state") not in {"STOPPED","ACCESS_DISABLED"}:
                 data.update(state="FAILED",message="Account worker exited; inspect local logs.")
+            elif data["stale"] and data.get("state") not in {"STOPPED","ACCESS_DISABLED"}:
+                data.update(state="STALE",mt5_state="STALE",message="Account worker status is overdue; inspect local logs.")
             return data
-        except (OSError,ValueError):
+        except (OSError,TypeError,ValueError):
+            if process is not None:
+                if process.poll() is not None:
+                    return {"state":"FAILED","message":"Account worker exited before reporting its status; inspect local logs."}
+                return {"state":"STARTING","message":"Waiting for the account worker to report its status."}
             return {"state":"STOPPED","message":"Automated trading is stopped."}
     def close(self):
         self.closing=True;self.pending.clear()

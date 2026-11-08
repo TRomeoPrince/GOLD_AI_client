@@ -4,8 +4,10 @@ __pycache__/
 build/pyi/
 build/azt_pyi/
 build/rebuild_20261104_pyi/
+build/rebuild_20261109_pyi/
 dist/
 dist_azt/
 dist_rebuild_20261104/
+dist_rebuild_20261109/
 release/
 .env
