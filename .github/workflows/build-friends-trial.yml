@@ -17,7 +17,7 @@ jobs:
   friends-trial:
     runs-on: windows-latest
     permissions:
-      contents: read
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -69,10 +69,18 @@ jobs:
           Get-FileHash -Algorithm SHA256 dist\AZT_Friends_Trial_Setup.exe | Format-List
           Get-Item dist\AZT_Friends_Trial_Setup.exe | Select-Object FullName,Length | Format-List
 
-      - name: Upload Windows trial setup
-        uses: actions/upload-artifact@v4
-        with:
-          name: AZT-Friends-Trial-14-Days
-          path: dist/AZT_Friends_Trial_Setup.exe
-          if-no-files-found: error
-          retention-days: 90
+      - name: Publish private preview release (no Actions artifact quota)
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = 'azt-friends-trial-14d-preview-20261116'
+          $exe = 'dist\AZT_Friends_Trial_Setup.exe'
+          $notes = 'Private preview for invited friends. Requires the AZT owner server update and a separate 14-day CLIENT_PC distributor pairing for each tester. Trial automatically uninstalls this edition after expiry; not MT5 or broker positions. Validate with a demo account first.'
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag $exe --clobber
+          } else {
+            gh release create $tag $exe --prerelease --title 'AZT Friends Trial - 14-Day Test' --notes $notes --target $env:GITHUB_SHA
+          }
+          if ($LASTEXITCODE -ne 0) { throw "GitHub release upload failed: $LASTEXITCODE" }
