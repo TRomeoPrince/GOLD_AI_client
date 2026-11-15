@@ -19,6 +19,7 @@ from .executor import execute_instruction
 from .ledger import Ledger
 from .storage import APP_DIR, atomic_json, load_profile, set_desired_state
 from .symbols import resolve_symbol
+from .friends_trial import is_friends_edition, friends_trial_authorized
 
 class SafetyStop(RuntimeError): pass
 class MT5Disconnected(RuntimeError): pass
@@ -131,6 +132,8 @@ class ClientRuntime:
             else:
                 validate_signal(payload)
                 connection_account(self.account,trading=True)
+                if is_friends_edition() and not friends_trial_authorized(self.api.overview(self.token)):
+                    raise SafetyStop("AZT Friends edition accepts only active 14-day trial accounts.")
                 policy=validate_risk_policy(self.api.risk_policy(self.token))
                 if policy["news_lock"]: raise ValueError("News Lock blocks new entries.")
                 def guard():
@@ -184,6 +187,8 @@ class ClientRuntime:
                         self.token=authorization.session_token
                         if authorization.allowed is not True: raise ClientAccessRevoked(authorization.message)
                         if not self.token: raise ClientAccessRevoked("Server returned no authorized session.")
+                    if is_friends_edition() and not friends_trial_authorized(self.api.overview(self.token)):
+                        raise ClientAccessRevoked("AZT Friends edition requires an active server-issued 14-day trial.")
                     connection_account(self.account)
                     self.flush_acks()
                     if self.stop.is_set():
