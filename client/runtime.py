@@ -19,7 +19,7 @@ from .executor import execute_instruction
 from .ledger import Ledger
 from .storage import APP_DIR, atomic_json, load_profile, set_desired_state
 from .symbols import resolve_symbol
-from .friends_trial import is_friends_edition, friends_trial_authorized
+from .friends_trial import is_friends_edition, friends_trial_authorized, observe_subscription
 
 class SafetyStop(RuntimeError): pass
 class MT5Disconnected(RuntimeError): pass
@@ -187,8 +187,11 @@ class ClientRuntime:
                         self.token=authorization.session_token
                         if authorization.allowed is not True: raise ClientAccessRevoked(authorization.message)
                         if not self.token: raise ClientAccessRevoked("Server returned no authorized session.")
-                    if is_friends_edition() and not friends_trial_authorized(self.api.overview(self.token)):
-                        raise ClientAccessRevoked("AZT Friends edition requires an active server-issued 14-day trial.")
+                    if is_friends_edition():
+                        friends_overview = self.api.overview(self.token)
+                        if not friends_trial_authorized(friends_overview):
+                            raise ClientAccessRevoked("AZT Friends edition requires an active server-issued 14-day trial.")
+                        observe_subscription(friends_overview.get("subscription", {}))
                     connection_account(self.account)
                     self.flush_acks()
                     if self.stop.is_set():
