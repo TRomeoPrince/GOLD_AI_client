@@ -16,6 +16,7 @@ from client.api import GoldAIServer, for_account
 from client.manager import WorkerManager
 from client.storage import APP_DIR, PUBLIC_SERVER_URL, load_profile, save_profile, set_desired_state
 from client.timezones import CHOICES, display_time, remaining_text, valid_zone
+from client.friends_trial import is_friends_edition, observe_subscription, local_trial_expired, run_expiry_guard
 
 BG="#08131f"; PANEL="#101f2c"; PANEL2="#172a38"; GOLD="#e8bd67"; TEXT="#edf3ee"; MUTED="#9eaea9"; GREEN="#6ed6ac"; RED="#fa8586"
 
@@ -53,7 +54,7 @@ def table(parent,columns,height=9):
 class GoldAIClientApp(tk.Tk):
     def __init__(self,*,smoke=False):
         super().__init__()
-        self.title("AGORA ZION TRADER • Client")
+        self.title("AGORA ZION TRADER • Friends Trial (14 days)" if is_friends_edition() else "AGORA ZION TRADER • Client")
         self.geometry("1280x800")
         self.minsize(min(1000,self.winfo_screenwidth()-80),min(700,self.winfo_screenheight()-100))
         self.resizable(True,True)
@@ -451,6 +452,10 @@ class GoldAIClientApp(tk.Tk):
 
     def _periodic(self):
         if self.closing:return
+        if is_friends_edition() and local_trial_expired():
+            self.status.set("Your 14-day trial has expired. Automated trading is disabled; the trial will uninstall automatically.")
+            self.on_close()
+            return
         if self.session_token:self.refresh_data(quiet=True)
         self.after(15000,self._periodic)
 
@@ -460,6 +465,8 @@ class GoldAIClientApp(tk.Tk):
         page=self.page_name.get()
         def fetch():
             data={"overview":api.overview(token),"messages":api.messages(token),"trades":api.trades(token)}
+            if is_friends_edition():
+                observe_subscription(data["overview"].get("subscription", {}))
             if page=="Referrals":data["referrals"]=api.referrals(token)
             if page=="Payments":data.update(plans=api.plans(token),methods=api.payment_methods(token),payments=api.payments(token))
             return data
@@ -623,7 +630,9 @@ def smoke_test():
     print("AZT Client responsive UI smoke passed; no server connection, MT5 connection or order.")
 
 if __name__=="__main__":
-    if len(sys.argv)>1 and sys.argv[1]=="--worker":
+    if len(sys.argv)>1 and sys.argv[1]=="--trial-guard":
+        raise SystemExit(run_expiry_guard())
+    elif len(sys.argv)>1 and sys.argv[1]=="--worker":
         from client.runtime import worker
         worker(sys.argv[2])
     elif len(sys.argv)>1 and sys.argv[1]=="--probe":
@@ -636,5 +645,12 @@ if __name__=="__main__":
         except RuntimeError as exc:
             dialog=tk.Tk();dialog.withdraw();messagebox.showinfo("AZT Client",str(exc),parent=dialog);dialog.destroy()
         else:
-            try:GoldAIClientApp().mainloop()
+            try:
+                if is_friends_edition() and local_trial_expired():
+                    dialog=tk.Tk();dialog.withdraw()
+                    messagebox.showinfo("AZT Friends Trial", "Your 14-day trial has expired. AZT will uninstall the trial edition; your MetaTrader 5 and broker positions remain untouched.", parent=dialog)
+                    dialog.destroy()
+                    run_expiry_guard()
+                else:
+                    GoldAIClientApp().mainloop()
             finally:workspace_lock.close()
