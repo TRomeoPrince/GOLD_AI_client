@@ -49,6 +49,16 @@ class FriendsTrialTest(unittest.TestCase):
             self.assertFalse(friends_trial.local_trial_expired(path=path, now=self.end - timedelta(seconds=1)))
             self.assertTrue(friends_trial.local_trial_expired(path=path, now=self.end))
 
+
+    def test_execution_is_permitted_only_by_active_fourteen_day_owner_lease(self):
+        active = {"allowed": True, "subscription": self.sub}
+        self.assertTrue(friends_trial.friends_trial_authorized(active))
+        self.assertFalse(friends_trial.friends_trial_authorized({"allowed": False, "subscription": self.sub}))
+        self.assertFalse(friends_trial.friends_trial_authorized({"allowed": True,
+            "subscription": dict(self.sub, expires_utc=(self.start + timedelta(days=30)).isoformat())}))
+        self.assertFalse(friends_trial.friends_trial_authorized({"allowed": True,
+            "subscription": dict(self.sub, access_kind="PAID")}))
+
     def test_invalid_and_missing_lease_never_launch_cleanup(self):
         with TemporaryDirectory() as folder:
             path = Path(folder) / "lease.json"
