@@ -600,7 +600,10 @@ class GoldAIClientApp(tk.Tk):
         if self.closing:return
         self.closing=True;self.withdraw()
         def close():
-            self.manager.close();self.after(0,self.destroy)
+            self.manager.close()
+            if is_friends_edition() and local_trial_expired():
+                run_expiry_guard()
+            self.after(0,self.destroy)
         threading.Thread(target=close,daemon=True).start()
 
 def smoke_test():
