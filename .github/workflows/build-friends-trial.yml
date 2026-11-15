@@ -1,0 +1,78 @@
+name: Build AZT Friends 14-Day Trial Installer
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/azt-friends-14day-trial-20261116
+  pull_request:
+    paths:
+      - "app.py"
+      - "client/**"
+      - "build/AZT_Friends_Trial.*"
+      - "build/trial_*.ps1"
+      - ".github/workflows/build-friends-trial.yml"
+
+jobs:
+  friends-trial:
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install client dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Run safety and expiry tests
+        shell: pwsh
+        run: python -m unittest discover -s tests -v
+
+      - name: Verify PowerShell syntax
+        shell: pwsh
+        run: |
+          foreach ($file in @('build/trial_schedule.ps1', 'build/trial_auto_uninstall.ps1')) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file).Path, [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors.Count -gt 0) { throw "PowerShell syntax errors in $file : $($errors -join '; ')" }
+          }
+
+      - name: Build standalone friends client
+        shell: pwsh
+        run: |
+          python -m PyInstaller --clean --noconfirm --distpath dist --workpath build\friends-pyi build\AZT_Friends_Trial.spec
+          if (-not (Test-Path dist\AZT_Friends_Trial.exe)) { throw 'Trial client EXE missing' }
+
+      - name: Compile Windows trial setup EXE
+        shell: pwsh
+        run: |
+          $compiler = 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
+          if (-not (Test-Path $compiler)) {
+            choco install innosetup --yes --no-progress
+          }
+          if (-not (Test-Path $compiler)) { throw 'Inno Setup compiler missing' }
+          & $compiler build\AZT_Friends_Trial.iss
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed: $LASTEXITCODE" }
+          if (-not (Test-Path dist\AZT_Friends_Trial_Setup.exe)) { throw 'Setup EXE missing' }
+
+      - name: SHA-256 and size
+        shell: pwsh
+        run: |
+          Get-FileHash -Algorithm SHA256 dist\AZT_Friends_Trial_Setup.exe | Format-List
+          Get-Item dist\AZT_Friends_Trial_Setup.exe | Select-Object FullName,Length | Format-List
+
+      - name: Upload Windows trial setup
+        uses: actions/upload-artifact@v4
+        with:
+          name: AZT-Friends-Trial-14-Days
+          path: dist/AZT_Friends_Trial_Setup.exe
+          if-no-files-found: error
+          retention-days: 90
