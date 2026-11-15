@@ -79,22 +79,37 @@ def _register_task():
     return _launch_powershell(schedule, "-Executable", str(Path(sys.executable).resolve()), wait=True)
 
 
-def observe_subscription(subscription, *, now=None, path=LEASE_PATH, registrar=None):
-    """Called only after authenticated owner /overview; never trusts a PC-issued lease."""
-    global _last_schedule_attempt
-    if not is_friends_edition() or not isinstance(subscription, dict):
-        return False
-    if subscription.get("access_kind") != "DISTRIBUTOR_TRIAL":
-        return False
-    if subscription.get("plan_code") != "DISTRIBUTOR_TRIAL":
-        return False
+def trial_window(subscription):
+    """Validate owner-provided subscription shape and exact 14-day duration."""
+    if not isinstance(subscription, dict):
+        return None
+    if (subscription.get("access_kind") != "DISTRIBUTOR_TRIAL"
+            or subscription.get("plan_code") != "DISTRIBUTOR_TRIAL"):
+        return None
     try:
         started = utc_datetime(subscription["starts_utc"])
         expires = utc_datetime(subscription["expires_utc"])
     except (KeyError, ValueError, TypeError):
+        return None
+    return (started, expires) if expires - started == timedelta(days=TRIAL_DAYS) else None
+
+
+def friends_trial_authorized(owner_overview):
+    """Owner-side allowed flag is authoritative; no local-clock grant of trading."""
+    return (isinstance(owner_overview, dict)
+            and owner_overview.get("allowed") is True
+            and trial_window(owner_overview.get("subscription")) is not None)
+
+
+def observe_subscription(subscription, *, now=None, path=LEASE_PATH, registrar=None):
+    """Called only after authenticated owner /overview; never trusts a PC-issued lease."""
+    global _last_schedule_attempt
+    if not is_friends_edition():
         return False
-    if expires - started != timedelta(days=TRIAL_DAYS):
+    window = trial_window(subscription)
+    if window is None:
         return False
+    started, expires = window
 
     now = now or datetime.now(timezone.utc)
     with _lock:
