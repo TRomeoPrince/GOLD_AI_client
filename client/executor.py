@@ -294,7 +294,7 @@ def execute_instruction(
         return ExecutionResult(False, None, "SYMBOL_INFO_UNAVAILABLE: no valid MT5 point size.")
     try:
         sl, tp, entry_mode = client_sl_tp(
-            payload, direction, price, float(info.point), int(info.digits))
+            payload, direction, price, float(info.point), int(getattr(info, "digits", 2)))
     except (ValueError, OverflowError, TypeError) as exc:
         return ExecutionResult(False, None, str(exc))
     # Broker stop levels are measured from the quote on which SL/TP can
@@ -375,6 +375,14 @@ def execute_instruction(
             continue
         if before_send is not None:
             before_send()
+        # The guarded quote must still describe the price submitted to MT5.
+        # Never send an outdated order when the market jumps during policy IO.
+        latest_tick = mt5.symbol_info_tick(symbol)
+        if latest_tick is None:
+            return ExecutionResult(False, None, "PRICE_CHANGED_BEFORE_SEND: no broker quote.")
+        latest_price = float(latest_tick.ask if direction == "BUY" else latest_tick.bid)
+        if not isfinite(latest_price) or abs(latest_price - price) > 20 * float(info.point):
+            return ExecutionResult(False, None, "PRICE_CHANGED_BEFORE_SEND: new quote requires a fresh signal check.")
         result = mt5.order_send(request)
         if result is None:
             raise RuntimeError("MT5 submission returned no result; review broker orders before retrying.")
