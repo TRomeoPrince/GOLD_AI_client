@@ -25,9 +25,10 @@ class GoldAIServer:
 
     def request(self, method, path, token="", **kwargs):
         headers = self._headers(token)
+        timeout = kwargs.pop("timeout", self.timeout)
         try:
             response = httpx.request(method, self.profile.server_url.rstrip("/") + path,
-                                     headers=headers, timeout=self.timeout, **kwargs)
+                                     headers=headers, timeout=timeout, **kwargs)
         except httpx.TimeoutException:
             raise ServerUnavailable("AZT server request timed out; reconnecting automatically.") from None
         except httpx.TransportError:
@@ -63,7 +64,8 @@ class GoldAIServer:
         }.items()})
 
     def next_instruction(self, token, since=None):
-        return self.request("GET", "/v1/instructions/next", token, params={"since": since} if since else {})
+        return self.request("GET", "/v1/instructions/next", token, params={"since": since, "wait_seconds": 10} if since else {"wait_seconds": 10},
+                            timeout=max(20.0, self.timeout + 5.0))
 
     def acknowledge(self, token, instruction_id, status, message=""):
         return self.request("POST", "/v1/instructions/ack", token, json={

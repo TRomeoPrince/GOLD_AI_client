@@ -347,8 +347,8 @@ class ExecutorSafetyTests(unittest.TestCase):
     def test_broker_minimum_above_policy_risk_is_blocked_even_below_two_percent(self):
         account=NS(equity=100,balance=100)
         terminal=NS(connected=True,trade_allowed=True)
-        info=NS(volume_min=.01,volume_max=100,volume_step=.01,filling_mode=3)
-        payload={"market":"GOLD","direction":"BUY","stop_loss":90,"take_profit":110}
+        info=NS(volume_min=.01,volume_max=100,volume_step=.01,filling_mode=3,point=.01,digits=2)
+        payload={"market":"GOLD","direction":"BUY","stop_loss":90,"take_profit":110,"metadata":{"entry":100}}
         with patch.object(executor.mt5,"terminal_info",return_value=terminal),patch.object(executor.mt5,"account_info",return_value=account),patch.object(executor,"_daily_loss_pct",return_value=0),patch.object(executor,"_resolve_symbol",return_value="GOLD"),patch.object(executor.mt5,"symbol_info_tick",return_value=NS(ask=100,bid=99,time=executor.time.time())),patch.object(executor,"tick_utc_epoch",return_value=executor.time.time()),patch.object(executor.mt5,"symbol_info",return_value=info),patch.object(executor.mt5,"order_calc_profit",side_effect=lambda _side,_symbol,volume,_entry,_sl:-150*volume),patch.object(executor.mt5,"order_send") as send:
             result=executor.execute_instruction(payload,risk_per_trade_pct=.9,max_single_risk_pct=2)
         self.assertFalse(result.sent)
@@ -366,8 +366,8 @@ class ExecutorSafetyTests(unittest.TestCase):
     def test_ambiguous_submission_is_not_retried_with_another_filling_mode(self):
         account=NS(equity=100,balance=100)
         terminal=NS(connected=True,trade_allowed=True)
-        payload={"market":"GOLD","direction":"BUY","stop_loss":90,"take_profit":110}
-        with patch.object(executor.mt5,"terminal_info",return_value=terminal),patch.object(executor.mt5,"account_info",return_value=account),patch.object(executor,"_daily_loss_pct",return_value=0),patch.object(executor,"_resolve_symbol",return_value="GOLD"),patch.object(executor.mt5,"symbol_info_tick",return_value=NS(ask=100,bid=99,time=executor.time.time())),patch.object(executor,"tick_utc_epoch",return_value=executor.time.time()),patch.object(executor,"_volume_for_risk",return_value=(.01,.9)),patch.object(executor,"_open_risk_pct",return_value=0),patch.object(executor.mt5,"symbol_info",return_value=NS(filling_mode=3)),patch.object(executor.mt5,"order_check",return_value=NS(retcode=0)),patch.object(executor.mt5,"order_send",return_value=None) as send:
+        payload={"market":"GOLD","direction":"BUY","stop_loss":90,"take_profit":110,"metadata":{"entry":100}}
+        with patch.object(executor.mt5,"terminal_info",return_value=terminal),patch.object(executor.mt5,"account_info",return_value=account),patch.object(executor,"_daily_loss_pct",return_value=0),patch.object(executor,"_resolve_symbol",return_value="GOLD"),patch.object(executor.mt5,"symbol_info_tick",return_value=NS(ask=100,bid=99,time=executor.time.time())),patch.object(executor,"tick_utc_epoch",return_value=executor.time.time()),patch.object(executor,"_volume_for_risk",return_value=(.01,.9)),patch.object(executor,"_open_risk_pct",return_value=0),patch.object(executor.mt5,"symbol_info",return_value=NS(filling_mode=3,point=.01,digits=2)),patch.object(executor.mt5,"order_check",return_value=NS(retcode=0)),patch.object(executor.mt5,"order_send",return_value=None) as send:
             with self.assertRaisesRegex(RuntimeError,"no result"):executor.execute_instruction(payload)
         send.assert_called_once()
 

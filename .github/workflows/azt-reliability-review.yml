@@ -1,0 +1,26 @@
+name: AZT client reliability review (no trading)
+on:
+  push:
+    branches: [fix/azt-client-reliability-20261123]
+  pull_request:
+    branches: [main]
+    paths:
+      - "client/**"
+      - "tests/**"
+      - ".github/workflows/azt-reliability-review.yml"
+jobs:
+  safe-tests:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install existing client dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Compile without executing workers
+        run: python -m compileall -q client tests
+      - name: Run new nontrading regression tests
+        run: python -m unittest discover -s tests -p "test_delivery_reliability.py" -v
+      - name: Run existing safety and network regression tests
+        run: python -m unittest discover -s tests -p "test_client_safety.py" -v
