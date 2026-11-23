@@ -22,6 +22,63 @@ class ExecutionResult:
     portfolio_after_pct: float = 0.0
 
 
+MAX_FAVORABLE_ENTRY_POINTS = 300
+
+
+def client_sl_tp(payload, direction, price, point, digits):
+    """Price adaptation without loosening the owner's SL in adverse movement.
+
+    A favorable client quote is allowed at most 300 of the CLIENT symbol's
+    MT5 points away from the owner's signal entry. In adverse movement, retain
+    the exact owner SL, and recalculate TP to preserve the original R multiple.
+    This guard does not override the 20-minute freshness requirement.
+    """
+    metadata = payload.get("metadata")
+    if not isinstance(metadata, dict) or "entry" not in metadata:
+        raise ValueError("Signal missing authoritative owner entry; cannot preserve R:R.")
+    owner_entry = float(metadata["entry"])
+    owner_sl = float(payload["stop_loss"])
+    owner_tp = float(payload["take_profit"])
+    if not all(isfinite(value) for value in (owner_entry, owner_sl, owner_tp, price, point)) or point <= 0:
+        raise ValueError("Invalid entry/stop/target geometry.")
+    if direction == "BUY":
+        risk = owner_entry - owner_sl
+        reward = owner_tp - owner_entry
+        favorable = price - owner_entry
+    elif direction == "SELL":
+        risk = owner_sl - owner_entry
+        reward = owner_entry - owner_tp
+        favorable = owner_entry - price
+    else:
+        raise ValueError("Invalid direction.")
+    if risk <= 0 or reward <= 0:
+        raise ValueError("Owner signal has invalid risk-to-reward geometry.")
+    # Only block movement toward the owner's TP, not a discounted drawdown
+    # entry. Broker price offsets cannot prove an owner's live P&L state.
+    if favorable > MAX_FAVORABLE_ENTRY_POINTS * point + point * 1e-6:
+        raise ValueError(f"ENTRY_TOO_FAR_IN_PROFIT: move exceeds {MAX_FAVORABLE_ENTRY_POINTS} MT5 points.")
+    rr = reward / risk
+    if favorable < 0:
+        # MUST NOT round or shift the fixed owner SL in this mode.
+        if round(owner_sl, digits) != owner_sl:
+            raise ValueError("Broker precision cannot preserve owner's exact SL.")
+        sl = owner_sl
+        adapted_risk = (price - sl) if direction == "BUY" else (sl - price)
+        if adapted_risk <= 0:
+            raise ValueError("STALE_SIGNAL: client price has reached/passed owner's SL.")
+        tp = price + rr * adapted_risk if direction == "BUY" else price - rr * adapted_risk
+        mode = "ADVERSE_FIXED_OWNER_SL"
+    else:
+        sl = price - risk if direction == "BUY" else price + risk
+        tp = price + reward if direction == "BUY" else price - reward
+        sl = round(sl, digits)
+        mode = "FAVORABLE_SHIFTED_GEOMETRY"
+    tp = round(tp, digits)
+    if not ((sl < price < tp) if direction == "BUY" else (tp < price < sl)):
+        raise ValueError("STALE_SIGNAL: recalculated client SL/TP is invalid.")
+    return sl, tp, mode
+
+
 def _resolve_symbol(hint: str) -> str:
     return resolve_symbol(mt5, hint)
 
@@ -232,13 +289,24 @@ def execute_instruction(
             f"DAILY_LOSS_BLOCKED: {daily_loss:.2f}% >= {float(max_daily_loss_pct):.2f}%.")
 
     price = float(tick.ask if direction == "BUY" else tick.bid)
-    valid = sl < price < tp if direction == "BUY" else tp < price < sl
-    if not valid:
-        return ExecutionResult(
-            False,
-            None,
-            "STALE_SIGNAL: current price is outside SL/TP geometry.",
-        )
+    info = mt5.symbol_info(symbol)
+    if info is None or float(getattr(info, "point", 0) or 0) <= 0:
+        return ExecutionResult(False, None, "SYMBOL_INFO_UNAVAILABLE: no valid MT5 point size.")
+    try:
+        sl, tp, entry_mode = client_sl_tp(
+            payload, direction, price, float(info.point), int(info.digits))
+    except (ValueError, OverflowError, TypeError) as exc:
+        return ExecutionResult(False, None, str(exc))
+    # Broker stop levels are measured from the quote on which SL/TP can
+    # actually trigger (bid for BUY, ask for SELL), not from order entry.
+    closing_quote = float(tick.bid if direction == "BUY" else tick.ask)
+    minimum_gap = max(int(getattr(info,"trade_stops_level",0) or 0),
+                      int(getattr(info,"trade_freeze_level",0) or 0)) * float(info.point)
+    stop_distance = closing_quote - sl if direction == "BUY" else sl - closing_quote
+    target_distance = tp - closing_quote if direction == "BUY" else closing_quote - tp
+    if stop_distance <= minimum_gap or target_distance <= minimum_gap:
+        return ExecutionResult(False, None,
+            "BROKER_STOPS_BLOCKED: client stop/target too close to live quote.")
 
     volume, single_pct = _volume_for_risk(
         direction,
@@ -283,8 +351,7 @@ def execute_instruction(
         "type_time": mt5.ORDER_TIME_GTC,
     }
 
-    info = mt5.symbol_info(symbol)
-    advertised = int(getattr(info, "filling_mode", -1)) if info is not None else -1
+    advertised = int(getattr(info, "filling_mode", -1))
     candidates = []
     if advertised & 1:
         candidates.append(int(mt5.ORDER_FILLING_FOK))
