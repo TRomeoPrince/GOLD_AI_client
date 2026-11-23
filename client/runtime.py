@@ -22,6 +22,7 @@ from .symbols import resolve_symbol
 
 class SafetyStop(RuntimeError): pass
 class MT5Disconnected(RuntimeError): pass
+class SkipInstruction(ValueError): pass
 
 def utc_now(): return datetime.now(timezone.utc).isoformat()
 
@@ -113,7 +114,15 @@ class ClientRuntime:
             state="ERROR_REVIEW" if row["state"]=="SUBMITTING" else row["state"]
             if row["state"]=="SUBMITTING":
                 self.ledger.finish(self.key,row["signal_key"],state,row["message"])
-            self.api.acknowledge(self.token,row["instruction_id"],state,row["message"])
+            try:
+                self.api.acknowledge(self.token,row["instruction_id"],state,row["message"])
+            except ValueError as exc:
+                # Non-retriable HTTP 4xx, such as an old server's 404. Do not
+                # hold this account hostage or ever resubmit its execution.
+                if self.ledger.fail_ack(self.key,row["signal_key"],str(exc)):
+                    self.report(state="ACK_REVIEW",server_state="CONNECTED",
+                                message=f"ACK dead-lettered after repeated rejection: {exc}")
+                continue
             self.ledger.acknowledge(self.key,row["signal_key"])
 
     def process(self,data):
@@ -138,9 +147,9 @@ class ClientRuntime:
                     connection_account(self.account,trading=True)
                     validate_signal(payload)
                     latest=validate_risk_policy(self.api.risk_policy(self.token))
-                    if latest["news_lock"]: raise SafetyStop("News Lock enabled before submission.")
+                    if latest["news_lock"]: raise SkipInstruction("News Lock enabled before submission.")
                     if latest != policy:
-                        raise SafetyStop("Risk policy changed; instruction skipped before submission.")
+                        raise SkipInstruction("Risk policy changed; instruction skipped before submission.")
                     # Stop/account changes can arrive while the final HTTP check
                     # is in flight. Recheck after it, immediately before IPC send.
                     if self.stop.is_set(): raise SafetyStop("Trading was stopped before submission.")
@@ -203,7 +212,7 @@ class ClientRuntime:
                         self.api.telemetry(self.token,snapshot(self.account,self.clock))
                         self.last_telemetry=time.time()
                     self.report(state="CONNECTED",server_state="CONNECTED",mt5_state="CONNECTED",message="Waiting for fresh AZT signals.")
-                    self.stop.wait(1)
+                    self.stop.wait(0.25)
                 except (ClientAccessRevoked,SafetyStop) as exc:
                     set_desired_state(self.account["id"],False)
                     self.report(state="ACCESS_DISABLED",server_state="CONNECTED",mt5_state="BLOCKED",desired=False,message=str(exc))
