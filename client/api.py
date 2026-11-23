@@ -63,7 +63,7 @@ class GoldAIServer:
         }.items()})
 
     def next_instruction(self, token, since=None):
-        return self.request("GET", "/v1/instructions/next", token, params={"since": since} if since else {})
+        return self.request("GET", "/v1/instructions/next", token, params={"since": since, "wait_seconds": 10} if since else {"wait_seconds": 10})
 
     def acknowledge(self, token, instruction_id, status, message=""):
         return self.request("POST", "/v1/instructions/ack", token, json={
