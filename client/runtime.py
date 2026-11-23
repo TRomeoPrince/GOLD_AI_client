@@ -211,7 +211,11 @@ class ClientRuntime:
                     if time.time()-self.last_telemetry>=15:
                         self.api.telemetry(self.token,snapshot(self.account,self.clock))
                         self.last_telemetry=time.time()
-                    self.report(state="CONNECTED",server_state="CONNECTED",mt5_state="CONNECTED",message="Waiting for fresh AZT signals.")
+                    reason = str(data.get("blocked_reason") or "")
+                    if reason:
+                        self.report(state="NEWS_BLOCKED",server_state="CONNECTED",mt5_state="CONNECTED",message=reason)
+                    else:
+                        self.report(state="CONNECTED",server_state="CONNECTED",mt5_state="CONNECTED",message="Waiting for fresh AZT signals.")
                     self.stop.wait(0.25)
                 except (ClientAccessRevoked,SafetyStop) as exc:
                     set_desired_state(self.account["id"],False)
