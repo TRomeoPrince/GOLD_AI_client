@@ -1,5 +1,7 @@
 name: AZT client reliability review (no trading)
 on:
+  push:
+    branches: [fix/azt-client-reliability-20261123]
   pull_request:
     branches: [main]
     paths:
